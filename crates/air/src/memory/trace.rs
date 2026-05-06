@@ -1,11 +1,11 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use punctum_vm::MemoryOperation;
+use punctum_vm::{MemoryOperation, MemoryType};
 
 use super::air::{MemoryColumns, NUM_COLS};
 
 struct MemoryOp {
-    memory_type: u8,
+    memory_type: MemoryType,
     address: u32,
     timestamp: u32,
     read: u32,
@@ -15,25 +15,14 @@ struct MemoryOp {
 impl From<&MemoryOperation> for MemoryOp {
     fn from(op: &MemoryOperation) -> Self {
         match *op {
-            MemoryOperation::Read {
-                memory_type,
-                address,
-                timestamp,
-                value,
-            } => Self {
+            MemoryOperation::Read { memory_type, address, timestamp, value } => Self {
                 memory_type,
                 address,
                 timestamp,
                 read: value,
                 write: value,
             },
-            MemoryOperation::Write {
-                memory_type,
-                address,
-                timestamp,
-                old_value,
-                new_value,
-            } => Self {
+            MemoryOperation::Write { memory_type, address, timestamp, old_value, new_value } => Self {
                 memory_type,
                 address,
                 timestamp,
@@ -64,7 +53,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     vm_ops: &[MemoryOperation],
 ) -> DenseMatrix<F> {
     let mut ops: Vec<MemoryOp> = vm_ops.iter().map(MemoryOp::from).collect();
-    ops.sort_by_key(|op| (op.memory_type, op.address, op.timestamp));
+    ops.sort_by_key(|op| (op.memory_type as u8, op.address, op.timestamp));
 
     let num_ops = ops.len();
     assert!(num_ops > 0, "memory trace must have at least one operation");
@@ -80,14 +69,14 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     for (i, op) in ops.iter().enumerate() {
         let row = &mut rows[i];
 
-        row.memory_type = F::from_u64(op.memory_type as u64);
+        row.memory_type = F::from_u64(op.memory_type as u64); // Register=0, Ram=1
         row.address = u32_to_limbs(op.address);
         row.timestamp = u32_to_limbs(op.timestamp);
         row.read = u32_to_limbs(op.read);
         row.write = u32_to_limbs(op.write);
 
         if let Some(next) = ops.get(i + 1) {
-            row.is_memory_type_equal = F::from_bool(op.memory_type == next.memory_type);
+            row.is_memory_type_equal = F::from_bool(op.memory_type as u8 == next.memory_type as u8);
             row.is_address_equal = F::from_bool(op.address == next.address);
             row.is_timestamp_equal = F::from_bool(op.timestamp == next.timestamp);
         }
@@ -102,7 +91,7 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
     use p3_mersenne_31::Mersenne31;
-    use punctum_vm::{MemoryOperation, VM};
+    use punctum_vm::{MemoryOperation, MemoryType, VM};
     use std::borrow::Borrow;
 
     type F = Mersenne31;
@@ -132,10 +121,10 @@ mod tests {
     #[test]
     fn ops_are_sorted() {
         let ops = vec![
-            MemoryOperation::Read  { memory_type: 1, address: 10, timestamp: 5, value: 99 },
-            MemoryOperation::Read  { memory_type: 0, address:  5, timestamp: 3, value:  7 },
-            MemoryOperation::Write { memory_type: 0, address:  5, timestamp: 1, old_value: 0, new_value: 7 },
-            MemoryOperation::Read  { memory_type: 1, address: 10, timestamp: 2, value: 42 },
+            MemoryOperation::Read  { memory_type: MemoryType::Ram,      address: 10, timestamp: 5, value: 99 },
+            MemoryOperation::Read  { memory_type: MemoryType::Register, address:  5, timestamp: 3, value:  7 },
+            MemoryOperation::Write { memory_type: MemoryType::Register, address:  5, timestamp: 1, old_value: 0, new_value: 7 },
+            MemoryOperation::Read  { memory_type: MemoryType::Ram,      address: 10, timestamp: 2, value: 42 },
         ];
         let trace: DenseMatrix<F> = build_trace(&ops);
 
@@ -151,13 +140,13 @@ mod tests {
     #[test]
     fn transition_flags() {
         let ops = vec![
-            // (0, addr=1, ts=0) -> (0, addr=1, ts=2): same type, same addr, diff ts
-            MemoryOperation::Write { memory_type: 0, address: 1, timestamp: 0, old_value: 0, new_value: 5 },
-            MemoryOperation::Read  { memory_type: 0, address: 1, timestamp: 2, value: 5 },
-            // (0, addr=1, ts=2) -> (0, addr=3, ts=4): same type, diff addr
-            MemoryOperation::Write { memory_type: 0, address: 3, timestamp: 4, old_value: 0, new_value: 9 },
-            // (0, addr=3, ts=4) -> (1, addr=100, ts=6): diff type
-            MemoryOperation::Read  { memory_type: 1, address: 100, timestamp: 6, value: 0 },
+            // (Register, addr=1, ts=0) -> (Register, addr=1, ts=2): same type, same addr, diff ts
+            MemoryOperation::Write { memory_type: MemoryType::Register, address: 1,   timestamp: 0, old_value: 0, new_value: 5 },
+            MemoryOperation::Read  { memory_type: MemoryType::Register, address: 1,   timestamp: 2, value: 5 },
+            // (Register, addr=1, ts=2) -> (Register, addr=3, ts=4): same type, diff addr
+            MemoryOperation::Write { memory_type: MemoryType::Register, address: 3,   timestamp: 4, old_value: 0, new_value: 9 },
+            // (Register, addr=3, ts=4) -> (Ram, addr=100, ts=6): diff type
+            MemoryOperation::Read  { memory_type: MemoryType::Ram,      address: 100, timestamp: 6, value: 0 },
         ];
         let trace: DenseMatrix<F> = build_trace(&ops);
 
@@ -186,7 +175,7 @@ mod tests {
     // A Read maps to read==write.
     #[test]
     fn read_op_has_same_read_write() {
-        let ops = vec![MemoryOperation::Read { memory_type: 0, address: 2, timestamp: 0, value: 42 }];
+        let ops = vec![MemoryOperation::Read { memory_type: MemoryType::Register, address: 2, timestamp: 0, value: 42 }];
         let trace: DenseMatrix<F> = build_trace(&ops);
         let r = row(&trace, 0);
         assert_eq!(r.read,  limbs(42));
@@ -196,7 +185,7 @@ mod tests {
     // A Write maps old_value→read, new_value→write.
     #[test]
     fn write_op_splits_old_and_new() {
-        let ops = vec![MemoryOperation::Write { memory_type: 0, address: 2, timestamp: 0, old_value: 7, new_value: 42 }];
+        let ops = vec![MemoryOperation::Write { memory_type: MemoryType::Register, address: 2, timestamp: 0, old_value: 7, new_value: 42 }];
         let trace: DenseMatrix<F> = build_trace(&ops);
         let r = row(&trace, 0);
         assert_eq!(r.read,  limbs(7));
@@ -207,9 +196,9 @@ mod tests {
     #[test]
     fn padding_rows_are_zero() {
         let ops = vec![
-            MemoryOperation::Read  { memory_type: 0, address: 0, timestamp: 0, value: 0 },
-            MemoryOperation::Write { memory_type: 0, address: 1, timestamp: 1, old_value: 0, new_value: 5 },
-            MemoryOperation::Read  { memory_type: 0, address: 1, timestamp: 2, value: 5 },
+            MemoryOperation::Read  { memory_type: MemoryType::Register, address: 0, timestamp: 0, value: 0 },
+            MemoryOperation::Write { memory_type: MemoryType::Register, address: 1, timestamp: 1, old_value: 0, new_value: 5 },
+            MemoryOperation::Read  { memory_type: MemoryType::Register, address: 1, timestamp: 2, value: 5 },
         ];
         let trace: DenseMatrix<F> = build_trace(&ops);
         assert_eq!(trace.values.len() / trace.width, 4);

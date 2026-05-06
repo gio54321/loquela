@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryType {
+    Register = 0,
+    Ram = 1,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
@@ -16,16 +22,14 @@ pub struct VMState {
 pub enum MemoryOperation {
     /// A read that does not change the cell's value.
     Read {
-        /// 0 = register file, 1 = RAM
-        memory_type: u8,
+        memory_type: MemoryType,
         address: u32,
         timestamp: u32,
         value: u32,
     },
     /// A write that changes the cell's value.
     Write {
-        /// 0 = register file, 1 = RAM
-        memory_type: u8,
+        memory_type: MemoryType,
         address: u32,
         timestamp: u32,
         old_value: u32,
@@ -81,14 +85,14 @@ impl VM {
                 let result = rs1_val.wrapping_add(imm as u32);
 
                 ops.push(MemoryOperation::Read {
-                    memory_type: 0,
+                    memory_type: MemoryType::Register,
                     address: rs1 as u32,
                     timestamp: self.timestamp,
                     value: rs1_val,
                 });
                 self.timestamp += 1;
                 ops.push(MemoryOperation::Write {
-                    memory_type: 0,
+                    memory_type: MemoryType::Register,
                     address: rd as u32,
                     timestamp: self.timestamp,
                     old_value: old_rd,
@@ -104,14 +108,14 @@ impl VM {
                 let result = rs1_val ^ (imm as u32);
 
                 ops.push(MemoryOperation::Read {
-                    memory_type: 0,
+                    memory_type: MemoryType::Register,
                     address: rs1 as u32,
                     timestamp: self.timestamp,
                     value: rs1_val,
                 });
                 self.timestamp += 1;
                 ops.push(MemoryOperation::Write {
-                    memory_type: 0,
+                    memory_type: MemoryType::Register,
                     address: rd as u32,
                     timestamp: self.timestamp,
                     old_value: old_rd,
@@ -144,7 +148,7 @@ impl VM {
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::XorI { rd, rs1, imm }
         } else {
-            unimplemented!("Only addi is implemented in this example");
+            unimplemented!("not supported");
         }
     }
 
@@ -160,10 +164,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
-        let word = ((imm as u32 & 0xFFF) << 20)
-            | ((rs1 as u32) << 15)
-            | ((rd as u32) << 7)
-            | 0b001_0011;
+        let word =
+            ((imm as u32 & 0xFFF) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b001_0011;
         word.to_le_bytes()
     }
 
@@ -187,11 +189,22 @@ mod tests {
 
         assert!(matches!(
             ops[0],
-            MemoryOperation::Read { memory_type: 0, address: 0, timestamp: 0, value: 0 }
+            MemoryOperation::Read {
+                memory_type: MemoryType::Register,
+                address: 0,
+                timestamp: 0,
+                value: 0
+            }
         ));
         assert!(matches!(
             ops[1],
-            MemoryOperation::Write { memory_type: 0, address: 1, timestamp: 1, old_value: 0, new_value: 5 }
+            MemoryOperation::Write {
+                memory_type: MemoryType::Register,
+                address: 1,
+                timestamp: 1,
+                old_value: 0,
+                new_value: 5
+            }
         ));
     }
 
@@ -207,26 +220,74 @@ mod tests {
         let ops = vm.get_memory_ops();
         assert_eq!(ops.len(), 4);
 
-        assert!(matches!(ops[0], MemoryOperation::Read  { address: 0, timestamp: 0, value: 0,  .. }));
-        assert!(matches!(ops[1], MemoryOperation::Write { address: 1, timestamp: 1, old_value: 0, new_value: 5, .. }));
-        assert!(matches!(ops[2], MemoryOperation::Read  { address: 1, timestamp: 2, value: 5,  .. }));
-        assert!(matches!(ops[3], MemoryOperation::Write { address: 2, timestamp: 3, old_value: 0, new_value: 8, .. }));
+        assert!(matches!(
+            ops[0],
+            MemoryOperation::Read {
+                address: 0,
+                timestamp: 0,
+                value: 0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[1],
+            MemoryOperation::Write {
+                address: 1,
+                timestamp: 1,
+                old_value: 0,
+                new_value: 5,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 5,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 8,
+                ..
+            }
+        ));
     }
 
     // xori uses old register value for read and produces new value for write.
     #[test]
     fn xori_logs_read_then_write() {
         let mut program = Vec::new();
-        program.extend_from_slice(&encode_addi(1, 0, 5));      // x1 = 5
+        program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
         program.extend_from_slice(&encode_xori(2, 1, -1i16)); // x2 = 5 ^ 0xFFFF_FFFF = 0xFFFF_FFFA
         let mut vm = VM::new(program);
         vm.run().unwrap();
 
         let ops = vm.get_memory_ops();
-        assert!(matches!(ops[2], MemoryOperation::Read  { address: 1, timestamp: 2, value: 5, .. }));
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 5,
+                ..
+            }
+        ));
         assert!(matches!(
             ops[3],
-            MemoryOperation::Write { address: 2, timestamp: 3, old_value: 0, new_value: 0xFFFF_FFFA, .. }
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 0xFFFF_FFFA,
+                ..
+            }
         ));
     }
 
@@ -241,7 +302,15 @@ mod tests {
 
         let ops = vm.get_memory_ops();
         assert_eq!(ops.len(), 4);
-        assert!(matches!(ops[3], MemoryOperation::Write { address: 1, old_value: 10, new_value: 20, .. }));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 1,
+                old_value: 10,
+                new_value: 20,
+                ..
+            }
+        ));
     }
 
     #[test]
