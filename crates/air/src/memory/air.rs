@@ -14,7 +14,7 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 pub struct MemoryColumns<F> {
     pub memory_type: F, // 0 -> registers, 1 -> memory
     pub address: [F; 4],
-    pub timestamp: [F; 4],
+    pub timestamp: F,
     pub read: [F; 4],
     pub write: [F; 4],
 
@@ -148,23 +148,22 @@ impl<F: Field> LookupAir<F> for MemoryAir {
 
         // timestamp must be sorted unless the address is different, so we send with mult is_address_equal
         lookups.push(self.register_lookup(
-            Kind::Global(String::from("u32_lt")),
-            &vec![(symbolic_main_local.timestamp.into_iter().chain(
-                symbolic_main_next.timestamp.into_iter()).chain(
-                        once(symbolic_main_local.is_timestamp_equal.clone()))
-                    .map(Into::into)
-                    .collect::<Vec<_>>(),
-            symbolic_main_local.is_address_equal.clone().into(),
-            Direction::Send,
-        )],
+            Kind::Global(String::from("timestamp_lt")),
+            &vec![(
+                vec![
+                    symbolic_main_local.timestamp.clone().into(),
+                    symbolic_main_next.timestamp.clone().into(),
+                    symbolic_main_local.is_timestamp_equal.clone().into(),
+                ],
+                symbolic_main_local.is_address_equal.clone().into(),
+                Direction::Send,
+            )],
         ));
 
         lookups.push(self.register_lookup(
             Kind::Global(String::from("memory")),
             &vec![(
-                symbolic_main_local
-                    .timestamp
-                    .into_iter()
+                once(symbolic_main_local.timestamp.clone())
                     .chain(once(symbolic_main_local.memory_type))
                     .chain(symbolic_main_local.address.into_iter())
                     .chain(symbolic_main_local.read.into_iter())

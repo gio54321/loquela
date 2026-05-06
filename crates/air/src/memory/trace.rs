@@ -71,7 +71,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
 
         row.memory_type = F::from_u64(op.memory_type as u64); // Register=0, Ram=1
         row.address = u32_to_limbs(op.address);
-        row.timestamp = u32_to_limbs(op.timestamp);
+        row.timestamp = F::from_u64(op.timestamp as u64);
         row.read = u32_to_limbs(op.read);
         row.write = u32_to_limbs(op.write);
 
@@ -129,10 +129,10 @@ mod tests {
         let trace: DenseMatrix<F> = build_trace(&ops);
 
         // Expected order: (0,5,1), (0,5,3), (1,10,2), (1,10,5)
-        assert_eq!(row(&trace, 0).memory_type, f(0)); assert_eq!(row(&trace, 0).address, limbs(5));  assert_eq!(row(&trace, 0).timestamp, limbs(1));
-        assert_eq!(row(&trace, 1).memory_type, f(0)); assert_eq!(row(&trace, 1).address, limbs(5));  assert_eq!(row(&trace, 1).timestamp, limbs(3));
-        assert_eq!(row(&trace, 2).memory_type, f(1)); assert_eq!(row(&trace, 2).address, limbs(10)); assert_eq!(row(&trace, 2).timestamp, limbs(2));
-        assert_eq!(row(&trace, 3).memory_type, f(1)); assert_eq!(row(&trace, 3).address, limbs(10)); assert_eq!(row(&trace, 3).timestamp, limbs(5));
+        assert_eq!(row(&trace, 0).memory_type, f(0)); assert_eq!(row(&trace, 0).address, limbs(5));  assert_eq!(row(&trace, 0).timestamp, f(1));
+        assert_eq!(row(&trace, 1).memory_type, f(0)); assert_eq!(row(&trace, 1).address, limbs(5));  assert_eq!(row(&trace, 1).timestamp, f(3));
+        assert_eq!(row(&trace, 2).memory_type, f(1)); assert_eq!(row(&trace, 2).address, limbs(10)); assert_eq!(row(&trace, 2).timestamp, f(2));
+        assert_eq!(row(&trace, 3).memory_type, f(1)); assert_eq!(row(&trace, 3).address, limbs(10)); assert_eq!(row(&trace, 3).timestamp, f(5));
     }
 
     // is_memory_type_equal / is_address_equal / is_timestamp_equal are set correctly
@@ -206,7 +206,7 @@ mod tests {
         let pad = row(&trace, 3);
         assert_eq!(pad.memory_type,          F::ZERO);
         assert_eq!(pad.address,              [F::ZERO; 4]);
-        assert_eq!(pad.timestamp,            [F::ZERO; 4]);
+        assert_eq!(pad.timestamp,            F::ZERO);
         assert_eq!(pad.read,                 [F::ZERO; 4]);
         assert_eq!(pad.write,                [F::ZERO; 4]);
         assert_eq!(pad.is_memory_type_equal, F::ZERO);
