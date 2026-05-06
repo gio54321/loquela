@@ -2,6 +2,7 @@ use p3_air::{Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, WindowAcce
 use p3_field::Field;
 use p3_field::PrimeCharacteristicRing;
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
+use std::iter::once;
 use std::{
     borrow::{Borrow, BorrowMut},
     vec,
@@ -14,6 +15,7 @@ pub struct U32LessThanColumns<F> {
 
     pub inverses: [F; 4],
     pub is_equals: [F; 4],
+    pub is_equal: F,
     pub mult_lts: [F; 4],
     pub mult: F,
 }
@@ -81,7 +83,7 @@ where
             .mult_lts
             .iter()
             .fold(AB::Expr::ZERO, |acc, x| acc + x.clone());
-        builder.assert_one(mult_sum);
+        builder.assert_bool(mult_sum.clone());
 
         // mult_lts[i] should be 1 on the first (most significant) position where x and y differ, and 0 otherwise
         let mut already_seen = AB::Expr::ZERO;
@@ -97,6 +99,9 @@ where
                 );
             already_seen += local.mult_lts[i].clone();
         }
+
+        // when the multiplicities are all zeros, then x and y are equal, so is_equal should be 1, otherwise it should be 0
+        builder.assert_eq(local.is_equal.clone(), AB::Expr::ONE - mult_sum);
     }
 }
 
@@ -138,12 +143,13 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
 
         lookups.push(self.register_lookup(
             Kind::Global(String::from("u32_lt")),
-            &vec![(
-                vec![symbolic_main_local.x.clone(), symbolic_main_local.y.clone()]
-                    .into_iter()
-                    .flatten()
+            &vec![(symbolic_main_local.x.into_iter().chain(
+                symbolic_main_local
+                    .y
+                    .into_iter()).chain(
+                        once(symbolic_main_local.is_equal.clone()))
                     .map(Into::into)
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 symbolic_main_local.mult.into(),
                 Direction::Receive,
             )],
