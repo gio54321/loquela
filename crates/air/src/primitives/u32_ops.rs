@@ -27,6 +27,36 @@ pub fn u32_add<AB: AirBuilder>(
 }
 
 /// Assumes that `x` and `y` are normalized byte limbs.
+/// Asserts that `y = x + 4` as u32, used for PC increment in RISC-V.
+/// Drops the top carry (overflow past 2^32 is not expected).
+pub fn u32_plus_four<AB: AirBuilder>(
+    builder: &mut AB,
+    x: &[AB::Var; 4],
+    y: &[AB::Var; 4],
+    carries: &[AB::Var; 3],
+) where
+    AB::F: QuotientMap<u32>,
+{
+    for i in 0..4 {
+        let carry_in: AB::Expr = if i == 0 {
+            AB::Expr::from(AB::F::from_u32(4))
+        } else {
+            carries[i - 1].into()
+        };
+        let carry_out: AB::Expr = if i < 3 {
+            builder.assert_bool(carries[i]);
+            carries[i].into()
+        } else {
+            AB::Expr::ZERO
+        };
+        builder.assert_eq(
+            y[i].clone() + carry_out * AB::F::from_u32(1 << 8),
+            x[i].clone() + carry_in,
+        );
+    }
+}
+
+/// Assumes that `x` and `y` are normalized byte limbs.
 /// Asserts that `y = x + 1` as u32 with carry propagation.
 pub fn u32_inc<AB: AirBuilder>(
     builder: &mut AB,
