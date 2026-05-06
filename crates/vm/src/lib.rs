@@ -1,0 +1,196 @@
+use std::collections::HashMap;
+
+#[derive(Debug, PartialEq)]
+pub enum Instruction {
+    AddI { rd: u8, rs1: u8, imm: i16 },
+    XorI { rd: u8, rs1: u8, imm: i16 },
+}
+
+#[derive(Debug, Clone)]
+pub struct VMState {
+    pub pc: u32,
+    pub registers: [u32; 32],
+}
+
+#[derive(Debug, Clone)]
+pub enum MemoryOperation {
+    Read { address: u32, value: u32 },
+    Write { address: u32, value: u32 },
+}
+
+pub struct VM {
+    pub program: Vec<u8>,
+    pub memory: HashMap<u32, u32>,
+    pub pc: u32,
+    pub timestamp: u32,
+    pub trace: Vec<(VMState, Vec<MemoryOperation>)>,
+}
+
+impl VM {
+    pub fn new(program: Vec<u8>) -> Self {
+        Self {
+            program,
+            memory: HashMap::new(),
+            pc: 0,
+            timestamp: 0,
+            trace: Vec::new(),
+        }
+    }
+
+    pub fn run(&mut self) -> Result<(), String> {
+        let initial_state = VMState {
+            pc: self.pc,
+            registers: [0; 32],
+        };
+        self.trace.push((initial_state, Vec::new()));
+        while (self.pc as usize) < self.program.len() {
+            self.step()?;
+        }
+        Ok(())
+    }
+
+    pub fn step(&mut self) -> Result<(), String> {
+        let pc = self.pc as usize;
+        let word = u32::from_le_bytes([
+            self.program[pc],
+            self.program[pc + 1],
+            self.program[pc + 2],
+            self.program[pc + 3],
+        ]);
+        let decoded = Self::decode_instruction(word);
+        match decoded {
+            Instruction::AddI { rd, rs1, imm } => {
+                let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
+                let result = rs1_val.wrapping_add(imm as u32);
+                self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
+            }
+            Instruction::XorI { rd, rs1, imm } => {
+                let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
+                let result = rs1_val ^ (imm as u32);
+                self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
+            }
+        }
+        self.pc += 4;
+        Ok(())
+    }
+
+    fn decode_instruction(bytes: u32) -> Instruction {
+        if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b000 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::AddI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b100 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::XorI { rd, rs1, imm }
+        } else {
+            unimplemented!("Only addi is implemented in this example");
+        }
+    }
+
+    pub fn get_trace(&self) -> Vec<VMState> {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn decode_test_bin() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../guest-programs/test.bin");
+        let bytes = fs::read(&path).expect("failed to read test.bin");
+        assert!(
+            bytes.len() % 4 == 0,
+            "test.bin length {} is not a multiple of 4",
+            bytes.len()
+        );
+
+        let program: Vec<u32> = bytes
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+
+        for (i, word) in program.iter().enumerate() {
+            let word = *word;
+            let decoded = std::panic::catch_unwind(|| VM::decode_instruction(word));
+            match decoded {
+                Ok(instr) => println!("{:04x}: {:08x}  {:?}", i * 4, word, instr),
+                Err(_) => println!(
+                    "{:04x}: {:08x}  <unsupported opcode 0x{:02x}>",
+                    i * 4,
+                    word,
+                    word & 0x7f
+                ),
+            }
+        }
+    }
+
+    fn print_regs(regs: &[u32; 32]) {
+        for chunk in 0..4 {
+            let mut line = String::new();
+            for i in 0..8 {
+                let r = chunk * 8 + i;
+                line.push_str(&format!(" x{:<2}={:08x}", r, regs[r]));
+            }
+            println!("    {}", line);
+        }
+    }
+
+    #[test]
+    fn execute_test_bin() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../guest-programs/test.bin");
+        let program = fs::read(&path).expect("failed to read test.bin");
+
+        let mut vm = VM::new(program);
+        // Seed the trace with the initial state so step() can read/update it.
+        vm.trace.push((
+            VMState {
+                pc: vm.pc,
+                registers: [0; 32],
+            },
+            Vec::new(),
+        ));
+
+        println!("== initial state ==");
+        println!("  pc=0x{:08x}", vm.pc);
+        print_regs(&vm.trace.last().unwrap().0.registers);
+
+        let mut step_idx = 0;
+        while (vm.pc as usize) < vm.program.len() {
+            let pc_before = vm.pc;
+            let word = u32::from_le_bytes([
+                vm.program[pc_before as usize],
+                vm.program[pc_before as usize + 1],
+                vm.program[pc_before as usize + 2],
+                vm.program[pc_before as usize + 3],
+            ]);
+            let instr = VM::decode_instruction(word);
+
+            vm.step().expect("step failed");
+
+            let state = &vm.trace.last().unwrap().0;
+            println!(
+                "== step {} == pc 0x{:08x} -> 0x{:08x}  {:08x}  {:?}",
+                step_idx, pc_before, vm.pc, word, instr
+            );
+            print_regs(&state.registers);
+            step_idx += 1;
+        }
+
+        // Sanity-check final register values for the program in test.s:
+        //   addi x1, x1, -1  ; addi x2, x2, 0  ; addi x3, x3, 1
+        //   xori x4, x3, -1  ; xori x5, x2, 0x55
+        let regs = vm.trace.last().unwrap().0.registers;
+        assert_eq!(regs[1], u32::MAX);
+        assert_eq!(regs[2], 0);
+        assert_eq!(regs[3], 1);
+        assert_eq!(regs[4], 0xFFFF_FFFE);
+        assert_eq!(regs[5], 0x55);
+    }
+}

@@ -1,0 +1,8 @@
+[package]
+name    = "punctum-vm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+p3-field       = { workspace = true }
+p3-mersenne-31 = { workspace = true }

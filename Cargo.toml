@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/vm", "crates/air"]
+resolver = "2"
+
+[workspace.dependencies]
+p3-air = { version = "0.5.2" }
+p3-challenger = { version = "0.5.2" }
+p3-circle = { version = "0.5.2" }
+p3-commit = { version = "0.5.2" }
+p3-field = { version = "0.5.2" }
+p3-fri = { version = "0.5.2" }
+p3-keccak = { version = "0.5.2" }
+p3-matrix = { version = "0.5.2" }
+p3-merkle-tree = { version = "0.5.2" }
+p3-mersenne-31 = { version = "0.5.2" }
+p3-symmetric = { version = "0.5.2" }
+p3-uni-stark = { version = "0.5.2" }
+p3-batch-stark = { version = "0.5.2" }
+p3-lookup = { version = "0.5.2" }
