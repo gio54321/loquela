@@ -1,5 +1,6 @@
 use std::{
     borrow::{Borrow, BorrowMut},
+    iter::once,
     vec,
 };
 
@@ -23,7 +24,7 @@ pub enum InstructionId {
 
 #[repr(C)]
 pub struct DecodeColumns<F> {
-    pub pc: F,
+    pub pc: [F; 4],
     pub instruction: [F; 4],
     pub decompositions: [[F; 8]; 4],
     pub instr_type: Instruction<F>,
@@ -198,18 +199,20 @@ impl<F: Field> LookupAir<F> for DecodeAir {
 
         let mut lookups = Vec::new();
 
-        // lookup the instruction against the program table
-        let mut pc_offset = F::ZERO;
-        for _ in 0..4 {
+        // Fetch each byte of the instruction from the program table.
+        // PC is 4-byte aligned, so adding 0–3 to the low limb never produces a carry.
+        for (i, byte) in local.instruction.iter().enumerate() {
             lookups.push(self.register_lookup(
                 Kind::Global(String::from("program")),
                 &vec![(
-                    vec![local.pc + pc_offset, local.instruction[0].into()],
+                    once((local.pc[0] + F::from_u64(i as u64)).into())
+                        .chain(local.pc[1..].iter().cloned().map(Into::into))
+                        .chain(once(byte.clone().into()))
+                        .collect(),
                     F::ONE.into(),
                     Direction::Send,
                 )],
             ));
-            pc_offset += F::ONE;
         }
 
         // export the decoded instruction

@@ -1,16 +1,18 @@
-use std::{borrow::Borrow, borrow::BorrowMut, vec};
+use std::{borrow::Borrow, borrow::BorrowMut, iter::once, vec};
 
+use crate::primitives::u32_ops::u32_inc;
 use p3_air::{
     Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicVariable, WindowAccess,
 };
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{integers::QuotientMap, Field};
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 
 #[repr(C)]
 pub struct ProgramColumns<F> {
-    pub address: F,
+    pub address: [F; 4],
     pub value: F,
     pub mult: F,
+    pub inc_carries: [F; 4],
 }
 
 pub const NUM_MEMORY_COLS: usize = size_of::<ProgramColumns<u8>>();
@@ -50,6 +52,7 @@ impl<F> BaseAir<F> for ProgramAir {
 impl<AB: AirBuilder> Air<AB> for ProgramAir
 where
     AB::MainWindow: WindowAccess<AB::Var>,
+    AB::F: QuotientMap<u32>,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -57,11 +60,12 @@ where
         let next: &ProgramColumns<AB::Var> = main.next_slice().borrow();
 
         // todo: export commitment of the program
-        builder.when_first_row().assert_zero(local.address.clone());
+        for limb in local.address.iter() {
+            builder.when_first_row().assert_zero(limb.clone());
+        }
 
-        builder
-            .when_transition()
-            .assert_eq(next.address.clone(), local.address.clone() + AB::Expr::ONE);
+        let mut t = builder.when_transition();
+        u32_inc(&mut t, &local.address, &next.address, &local.inc_carries);
     }
 }
 
@@ -86,11 +90,10 @@ impl<F: Field> LookupAir<F> for ProgramAir {
         vec![self.register_lookup(
             Kind::Global(String::from("program")),
             &vec![(
-                vec![
-                    F::ONE.into(),
-                    symbolic_main_local.address.into(),
-                    symbolic_main_local.value.into(),
-                ],
+                symbolic_main_local.address.into_iter()
+                    .chain(once(symbolic_main_local.value))
+                    .map(Into::into)
+                    .collect(),
                 symbolic_main_local.mult.into(),
                 Direction::Receive,
             )],
