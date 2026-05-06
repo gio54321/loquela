@@ -1,7 +1,9 @@
 use p3_air::{Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, WindowAccess};
+use p3_field::integers::QuotientMap;
 use p3_field::Field;
 use p3_field::PrimeCharacteristicRing;
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
+use p3_matrix::dense::RowMajorMatrix;
 use std::iter::once;
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -156,4 +158,66 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
         ));
         lookups
     }
+}
+
+/// Build the main trace for `U32LessThanAir`.
+///
+/// Each entry `(x, y, mult)` represents a u32 comparison: `mult` is the number of times
+/// the tuple `(x, y, is_equal)` is received on the `"u32_lt"` bus.
+///
+/// All derived columns (`inverses`, `is_equals`, `mult_lts`, `is_equal`) are computed
+/// from `x` and `y`. Byte ordering is little-endian: byte index 3 is most significant.
+///
+/// The trace is padded to the next power of two using rows with `x = y = 0, mult = 0`.
+pub fn build_trace<F: Field + QuotientMap<u8>>(entries: &[(u32, u32, F)]) -> RowMajorMatrix<F> {
+    let height = entries.len().next_power_of_two().max(1);
+    let mut data = vec![F::ZERO; height * NUM_COLS];
+
+    let (prefix, rows, suffix) = unsafe { data.align_to_mut::<U32LessThanColumns<F>>() };
+    assert!(prefix.is_empty(), "Alignment should match");
+    assert!(suffix.is_empty(), "Alignment should match");
+    assert_eq!(rows.len(), height);
+
+    for (row, &(x, y, mult)) in rows.iter_mut().zip(entries.iter()) {
+        let x_bytes = x.to_le_bytes();
+        let y_bytes = y.to_le_bytes();
+
+        for i in 0..4 {
+            row.x[i] = F::from_int(x_bytes[i]);
+            row.y[i] = F::from_int(y_bytes[i]);
+
+            if x_bytes[i] == y_bytes[i] {
+                row.inverses[i] = F::ZERO;
+                row.is_equals[i] = F::ONE;
+            } else {
+                // constraint: inverses[i] * (y[i] - x[i]) + 1 = 0
+                // so inverses[i] = -1 / (y[i] - x[i])
+                let diff = F::from_int(y_bytes[i]) - F::from_int(x_bytes[i]);
+                row.inverses[i] = -diff.try_inverse().unwrap();
+                row.is_equals[i] = F::ZERO;
+            }
+        }
+
+        // mult_lts[i] = 1 at the highest byte index where x and y differ
+        let mut found = false;
+        for i in (0..4).rev() {
+            if !found && x_bytes[i] != y_bytes[i] {
+                row.mult_lts[i] = F::ONE;
+                found = true;
+            }
+            // remaining entries stay F::ZERO (already initialised)
+        }
+
+        row.is_equal = if x == y { F::ONE } else { F::ZERO };
+        row.mult = mult;
+    }
+
+    // Padding rows: x = y = 0, mult = 0.
+    // is_equals must be [1,1,1,1] and is_equal must be 1; all others stay zero.
+    for row in rows.iter_mut().skip(entries.len()) {
+        row.is_equals = [F::ONE; 4];
+        row.is_equal = F::ONE;
+    }
+
+    RowMajorMatrix::new(data, NUM_COLS)
 }

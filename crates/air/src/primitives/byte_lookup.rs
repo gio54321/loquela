@@ -4,6 +4,9 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 use p3_matrix::dense::RowMajorMatrix;
 use std::vec;
 
+/// Number of preprocessed rows: one per byte value 0..=255.
+const NUM_PREPROCESSED_ROWS: usize = 256;
+
 pub struct BytesAir {
     num_lookups: usize,
 }
@@ -59,4 +62,17 @@ impl<F: Field> LookupAir<F> for BytesAir {
             )],
         )]
     }
+}
+
+/// Build the main trace for `BytesAir`.
+///
+/// `multiplicities[v]` is the number of times byte value `v` is looked up.
+/// The slice must have exactly 256 elements (one per preprocessed row).
+pub fn build_trace<F: Field>(multiplicities: &[F]) -> RowMajorMatrix<F> {
+    assert_eq!(
+        multiplicities.len(),
+        NUM_PREPROCESSED_ROWS,
+        "BytesAir requires exactly {NUM_PREPROCESSED_ROWS} multiplicities"
+    );
+    RowMajorMatrix::new(multiplicities.to_vec(), 1)
 }

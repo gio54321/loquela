@@ -4,6 +4,9 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 use p3_matrix::dense::RowMajorMatrix;
 use std::vec;
 
+/// Number of preprocessed rows: all (x, y) byte pairs (65536 = 2^16).
+const NUM_PREPROCESSED_ROWS: usize = 256 * 256;
+
 pub struct XorAir {
     num_lookups: usize,
 }
@@ -73,4 +76,20 @@ impl<F: Field> LookupAir<F> for XorAir {
             )],
         )]
     }
+}
+
+/// Build the main trace for `XorAir`.
+///
+/// `multiplicities[i]` is the count for preprocessed row `i`, which holds
+/// `(x, y, x ^ y)` ordered as: `for x in 0..256 { for y in 0..256 { ... } }`,
+/// i.e. row index = `x * 256 + y`.
+///
+/// The slice must have exactly `NUM_PREPROCESSED_ROWS` = 65536 elements.
+pub fn build_trace<F: Field>(multiplicities: &[F]) -> RowMajorMatrix<F> {
+    assert_eq!(
+        multiplicities.len(),
+        NUM_PREPROCESSED_ROWS,
+        "XorAir requires exactly {NUM_PREPROCESSED_ROWS} multiplicities"
+    );
+    RowMajorMatrix::new(multiplicities.to_vec(), 1)
 }
