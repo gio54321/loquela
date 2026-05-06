@@ -14,8 +14,23 @@ pub struct VMState {
 
 #[derive(Debug, Clone)]
 pub enum MemoryOperation {
-    Read { address: u32, value: u32 },
-    Write { address: u32, value: u32 },
+    /// A read that does not change the cell's value.
+    Read {
+        /// 0 = register file, 1 = RAM
+        memory_type: u8,
+        address: u32,
+        timestamp: u32,
+        value: u32,
+    },
+    /// A write that changes the cell's value.
+    Write {
+        /// 0 = register file, 1 = RAM
+        memory_type: u8,
+        address: u32,
+        timestamp: u32,
+        old_value: u32,
+        new_value: u32,
+    },
 }
 
 pub struct VM {
@@ -58,20 +73,63 @@ impl VM {
             self.program[pc + 3],
         ]);
         let decoded = Self::decode_instruction(word);
+        let mut ops = Vec::new();
         match decoded {
             Instruction::AddI { rd, rs1, imm } => {
                 let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
+                let old_rd = self.trace.last().unwrap().0.registers[rd as usize];
                 let result = rs1_val.wrapping_add(imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: 0,
+                    address: rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: 0,
+                    address: rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
                 self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
             }
             Instruction::XorI { rd, rs1, imm } => {
                 let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
+                let old_rd = self.trace.last().unwrap().0.registers[rd as usize];
                 let result = rs1_val ^ (imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: 0,
+                    address: rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: 0,
+                    address: rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
                 self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
             }
         }
+        self.trace.last_mut().unwrap().1.extend(ops);
         self.pc += 4;
         Ok(())
+    }
+
+    /// Return all memory operations in execution order, across all steps.
+    pub fn get_memory_ops(&self) -> Vec<&MemoryOperation> {
+        self.trace.iter().flat_map(|(_, ops)| ops.iter()).collect()
     }
 
     fn decode_instruction(bytes: u32) -> Instruction {
@@ -100,6 +158,91 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b100 << 12)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    // addi x1, x0, 5  →  read x0 (val=0, ts=0), write x1 (old=0, new=5, ts=1)
+    #[test]
+    fn addi_logs_read_then_write() {
+        let mut vm = VM::new(encode_addi(1, 0, 5).to_vec());
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert_eq!(ops.len(), 2);
+
+        assert!(matches!(
+            ops[0],
+            MemoryOperation::Read { memory_type: 0, address: 0, timestamp: 0, value: 0 }
+        ));
+        assert!(matches!(
+            ops[1],
+            MemoryOperation::Write { memory_type: 0, address: 1, timestamp: 1, old_value: 0, new_value: 5 }
+        ));
+    }
+
+    // Two addi instructions: timestamps must be globally monotone.
+    #[test]
+    fn timestamps_increment_across_instructions() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 5)); // addi x1, x0, 5
+        program.extend_from_slice(&encode_addi(2, 1, 3)); // addi x2, x1, 3
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert_eq!(ops.len(), 4);
+
+        assert!(matches!(ops[0], MemoryOperation::Read  { address: 0, timestamp: 0, value: 0,  .. }));
+        assert!(matches!(ops[1], MemoryOperation::Write { address: 1, timestamp: 1, old_value: 0, new_value: 5, .. }));
+        assert!(matches!(ops[2], MemoryOperation::Read  { address: 1, timestamp: 2, value: 5,  .. }));
+        assert!(matches!(ops[3], MemoryOperation::Write { address: 2, timestamp: 3, old_value: 0, new_value: 8, .. }));
+    }
+
+    // xori uses old register value for read and produces new value for write.
+    #[test]
+    fn xori_logs_read_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 5));      // x1 = 5
+        program.extend_from_slice(&encode_xori(2, 1, -1i16)); // x2 = 5 ^ 0xFFFF_FFFF = 0xFFFF_FFFA
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert!(matches!(ops[2], MemoryOperation::Read  { address: 1, timestamp: 2, value: 5, .. }));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write { address: 2, timestamp: 3, old_value: 0, new_value: 0xFFFF_FFFA, .. }
+        ));
+    }
+
+    // Writing to the same register twice: old_value of second write is new_value of first.
+    #[test]
+    fn overwrite_same_register_tracks_old_value() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+        program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20, old = 10
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert_eq!(ops.len(), 4);
+        assert!(matches!(ops[3], MemoryOperation::Write { address: 1, old_value: 10, new_value: 20, .. }));
+    }
 
     #[test]
     fn decode_test_bin() {
