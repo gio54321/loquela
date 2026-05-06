@@ -117,7 +117,26 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
         let symbolic_main = symbolic_air_builder.main();
         let symbolic_main_local: &U32LessThanColumns<_> = symbolic_main.current_slice().borrow();
 
-        vec![self.register_lookup(
+        let mut lookups = Vec::new();
+
+        for i in 0..4 {
+            lookups.push(self.register_lookup(
+                Kind::Global(format!("byte{}_lt", i)),
+                &vec![(
+                        vec![
+                            symbolic_main_local.x[i].clone(),
+                            symbolic_main_local.y[i].clone(),
+                        ]
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                        symbolic_main_local.mult_lts[i].clone().into(),
+                        Direction::Send,
+                    )],
+            ));
+        }
+
+        lookups.push(self.register_lookup(
             Kind::Global(String::from("u32_lt")),
             &vec![(
                 vec![symbolic_main_local.x.clone(), symbolic_main_local.y.clone()]
@@ -128,6 +147,7 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
                 symbolic_main_local.mult.into(),
                 Direction::Receive,
             )],
-        )]
+        ));
+        lookups
     }
 }
