@@ -15,19 +15,19 @@ use p3_mersenne_31::Mersenne31;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkConfig;
 
-use punctum_air::boundaries::air::BoundariesAir;
-use punctum_air::decode::air::DecodeAir;
-use punctum_air::instructions::add::air::AddAir;
-use punctum_air::instructions::addi::air::AddiAir;
-use punctum_air::instructions::xori::air::XoriAir;
-use punctum_air::memory::air::MemoryAir;
-use punctum_air::primitives::byte_less_than_lookup::LessThanAir;
-use punctum_air::primitives::byte_lookup::BytesAir;
-use punctum_air::primitives::timestamp_less_than::TimestampLessThanAir;
-use punctum_air::primitives::u32_less_than_lookup::U32LessThanAir;
-use punctum_air::primitives::xor_lookup::XorAir;
-use punctum_air::program::air::ProgramAir;
-use punctum_vm::{Instruction, MemoryOperation, VM};
+use loquela_air::boundaries::air::BoundariesAir;
+use loquela_air::decode::air::DecodeAir;
+use loquela_air::instructions::add::air::AddAir;
+use loquela_air::instructions::addi::air::AddiAir;
+use loquela_air::instructions::xori::air::XoriAir;
+use loquela_air::memory::air::MemoryAir;
+use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
+use loquela_air::primitives::byte_lookup::BytesAir;
+use loquela_air::primitives::timestamp_less_than::TimestampLessThanAir;
+use loquela_air::primitives::u32_less_than_lookup::U32LessThanAir;
+use loquela_air::primitives::xor_lookup::XorAir;
+use loquela_air::program::air::ProgramAir;
+use loquela_vm::{Instruction, MemoryOperation, VM};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -376,40 +376,40 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let final_pc_bytes = (final_step.state.pc + 4).to_le_bytes();
     let final_pc: [Val; 4] = final_pc_bytes.map(|b| Val::from_u64(b as u64));
     let final_ts = Val::from_u64(vm.timestamp as u64);
-    let boundaries = punctum_air::boundaries::air::build_trace(final_pc, final_ts);
+    let boundaries = loquela_air::boundaries::air::build_trace(final_pc, final_ts);
 
-    let decode = punctum_air::decode::trace::build_trace::<Val>(steps);
+    let decode = loquela_air::decode::trace::build_trace::<Val>(steps);
 
     let add_trace = if has_add {
-        Some(punctum_air::instructions::add::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::add::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
     let addi_trace = if has_addi {
-        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::addi::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
     let xori_trace = if has_xori {
-        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::xori::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
 
-    let memory = punctum_air::memory::trace::build_trace::<Val>(&all_ops);
+    let memory = loquela_air::memory::trace::build_trace::<Val>(&all_ops);
 
     let n_decode_steps = steps.len();
     let num_decode_padding = n_decode_steps
         .next_power_of_two()
         .saturating_sub(n_decode_steps);
     let program_trace =
-        punctum_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
+        loquela_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
 
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
@@ -435,7 +435,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         }
     }
     let bytes_mults = bytes_multiplicities(&byte_checked_vals);
-    let bytes = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
+    let bytes = loquela_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
     for s in steps.iter() {
@@ -456,13 +456,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         }
     }
     let xor_mults = xor_multiplicities(&xori_triples);
-    let xor = punctum_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
+    let xor = loquela_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
 
-    let u32_lt = punctum_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
+    let u32_lt = loquela_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
     let timestamp_lt =
-        punctum_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
+        loquela_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
     let bytes_lt =
-        punctum_air::primitives::byte_less_than_lookup::build_trace::<Val>(&bytes_lt_mults);
+        loquela_air::primitives::byte_less_than_lookup::build_trace::<Val>(&bytes_lt_mults);
 
     // 4. Assemble AIRs in the same order as the traces vec built in `into_vecs`.
     let mut airs: Vec<LoquelAir> = vec![

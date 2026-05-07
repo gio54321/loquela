@@ -1,6 +1,6 @@
+use loquela_vm::{MemoryOperation, MemoryType};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use punctum_vm::{MemoryOperation, MemoryType};
 
 use super::air::{MemoryColumns, NUM_COLS};
 
@@ -104,9 +104,9 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loquela_vm::{MemoryOperation, MemoryType, VM};
     use p3_field::PrimeCharacteristicRing;
     use p3_mersenne_31::Mersenne31;
-    use punctum_vm::{MemoryOperation, MemoryType, VM};
     use std::borrow::Borrow;
 
     type F = Mersenne31;

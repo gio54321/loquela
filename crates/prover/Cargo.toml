@@ -1,11 +1,11 @@
 [package]
-name = "punctum-prover"
+name = "loquela-prover"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-punctum-vm = { path = "../vm" }
-punctum-air = { path = "../air" }
+loquela-vm = { path = "../vm" }
+loquela-air = { path = "../air" }
 p3-air = { workspace = true }
 p3-batch-stark = { workspace = true }
 p3-challenger = { workspace = true }

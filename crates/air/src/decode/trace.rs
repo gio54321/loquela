@@ -1,7 +1,7 @@
 use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use punctum_vm::ExecutionStep;
+use loquela_vm::ExecutionStep;
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
     let b = v.to_le_bytes();
