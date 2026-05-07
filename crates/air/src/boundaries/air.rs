@@ -7,13 +7,16 @@ use std::{
     iter::once,
 };
 
-/// Two-row AIR that enforces the initial and final execution boundaries via the "trace" bus.
+/// Four-row AIR that enforces the initial and final execution boundaries via the "trace" bus.
 ///
-/// Row 0 (first): sends (pc=0, timestamp=0) — the required initial state.
-/// Row 1 (last):  receives (pc, timestamp)  — the final state, unconstrained by this AIR.
+/// Row 0: sends  (pc=0, timestamp=0) — the required initial state.
+/// Rows 1–2: neutral padding rows (no bus interactions).
+/// Row 3: receives (pc, timestamp)   — the final state, unconstrained by this AIR.
 ///
-/// The preprocessed trace has a single column that acts as a row selector:
-///   row 0 → 0 (first row),  row 1 → 1 (last row).
+/// The preprocessed trace has TWO columns so padding rows can be fully neutral:
+///   col 0 = is_first: 1 only on row 0, else 0.
+///   col 1 = is_last:  1 only on row 3, else 0.
+/// CirclePCS requires ≥ 4 rows per committed matrix, so 4 is the minimum.
 #[repr(C)]
 pub struct BoundaryColumns<F> {
     pub pc: [F; 4],
@@ -44,6 +47,7 @@ impl<T> BorrowMut<BoundaryColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct BoundariesAir {
     num_lookups: usize,
 }
@@ -60,8 +64,17 @@ impl<F: Field> BaseAir<F> for BoundariesAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
-        // Row 0 = 0 (first-row selector), Row 1 = 1 (last-row selector).
-        Some(RowMajorMatrix::new(vec![F::ZERO, F::ONE], 1))
+        // 4 rows × 2 cols: (is_first, is_last).
+        // Row 0: (1,0), Rows 1-2: (0,0), Row 3: (0,1).
+        Some(RowMajorMatrix::new(
+            vec![
+                F::ONE, F::ZERO, // row 0
+                F::ZERO, F::ZERO, // row 1 (padding)
+                F::ZERO, F::ZERO, // row 2 (padding)
+                F::ZERO, F::ONE, // row 3
+            ],
+            2,
+        ))
     }
 }
 
@@ -85,16 +98,16 @@ impl<F: Field> LookupAir<F> for BoundariesAir {
 
         let symbolic_air_builder = SymbolicAirBuilder::<F>::new(AirLayout {
             main_width: BaseAir::<F>::width(self),
-            preprocessed_width: 1,
+            preprocessed_width: 2,
             ..Default::default()
         });
         let symbolic_main = symbolic_air_builder.main();
         let local: &BoundaryColumns<_> = symbolic_main.current_slice().borrow();
         let preprocessed_local = symbolic_air_builder.preprocessed().current_slice();
 
-        let is_last: p3_air::SymbolicExpression<F> = preprocessed_local[0].clone().into();
-        let is_first: p3_air::SymbolicExpression<F> =
-            Into::<p3_air::SymbolicExpression<F>>::into(F::ONE) - is_last.clone();
+        // Two independent selectors: only one is non-zero per row.
+        let is_first: p3_air::SymbolicExpression<F> = preprocessed_local[0].clone().into();
+        let is_last: p3_air::SymbolicExpression<F> = preprocessed_local[1].clone().into();
 
         let mut lookups = Vec::new();
 
@@ -111,7 +124,7 @@ impl<F: Field> LookupAir<F> for BoundariesAir {
             )],
         ));
 
-        // Row 1: receive (pc, timestamp) — the final execution state.
+        // Row 3: receive (pc, timestamp) — the final execution state.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("trace")),
             &vec![(
@@ -132,13 +145,14 @@ impl<F: Field> LookupAir<F> for BoundariesAir {
 
 /// Build the main trace for `BoundariesAir`.
 ///
-/// Row 0 holds zeros (the send uses constant 0s, so column values are irrelevant).
-/// Row 1 holds `final_pc` and `final_timestamp` — the final execution state to be received.
+/// Row 0 holds zeros (the send uses constant 0s).
+/// Rows 1–2 are neutral padding (all zeros, no bus contribution).
+/// Row 3 holds `final_pc` and `final_timestamp` — the final execution state to be received.
 pub fn build_trace<F: Field>(final_pc: [F; 4], final_timestamp: F) -> RowMajorMatrix<F> {
-    let mut data = vec![F::ZERO; 2 * NUM_COLS];
-    // Row 1: write final pc limbs then timestamp.
-    let row1_start = NUM_COLS;
-    data[row1_start..row1_start + 4].copy_from_slice(&final_pc);
-    data[row1_start + 4] = final_timestamp;
+    let mut data = vec![F::ZERO; 4 * NUM_COLS];
+    // Row 3: write final pc limbs then timestamp.
+    let row3_start = 3 * NUM_COLS;
+    data[row3_start..row3_start + 4].copy_from_slice(&final_pc);
+    data[row3_start + 4] = final_timestamp;
     RowMajorMatrix::new(data, NUM_COLS)
 }
