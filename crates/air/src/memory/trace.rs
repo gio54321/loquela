@@ -91,7 +91,11 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
             row.is_address_equal = F::from_bool(op.address == next.address);
             row.is_timestamp_equal = F::from_bool(op.timestamp == next.timestamp);
         }
-        // Last real row and padding rows keep F::ZERO for all equality flags.
+        // Last real row and padding rows keep F::ZERO for all equality flags and is_padding.
+    }
+
+    for row in rows[num_ops..].iter_mut() {
+        row.is_padding = F::ONE;
     }
 
     DenseMatrix::new(values, NUM_COLS)
@@ -299,6 +303,7 @@ mod tests {
         assert_eq!(pad.is_memory_type_equal, F::ZERO);
         assert_eq!(pad.is_address_equal, F::ZERO);
         assert_eq!(pad.is_timestamp_equal, F::ZERO);
+        assert_eq!(pad.is_padding, F::ONE);
     }
 
     // Run the VM, build the trace, and verify key cells end-to-end.

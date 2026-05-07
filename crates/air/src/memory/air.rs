@@ -21,6 +21,8 @@ pub struct MemoryColumns<F> {
     pub is_memory_type_equal: F,
     pub is_timestamp_equal: F,
     pub is_address_equal: F,
+
+    pub is_padding: F,
 }
 
 pub const NUM_COLS: usize = size_of::<MemoryColumns<u8>>();
@@ -72,6 +74,12 @@ where
         let main = builder.main();
         let local: &MemoryColumns<AB::Var> = main.current_slice().borrow();
         let next: &MemoryColumns<AB::Var> = main.next_slice().borrow();
+
+        builder.assert_bool(local.is_padding);
+        builder
+            .when_transition()
+            .when(local.is_padding)
+            .assert_one(next.is_padding);
 
         // constrain is_memory_type_equal to be 1 iff we are comparing the same memory type
         builder.assert_bool(local.is_memory_type_equal);
@@ -170,16 +178,18 @@ impl<F: Field> LookupAir<F> for MemoryAir {
         lookups.push(self.register_lookup(
             Kind::Global(String::from("memory")),
             &vec![(
-                once(symbolic_main_local.timestamp.clone())
-                    .chain(once(symbolic_main_local.memory_type))
-                    .chain(symbolic_main_local.address.into_iter())
-                    .chain(symbolic_main_local.read.into_iter())
-                    .chain(symbolic_main_local.write.into_iter())
-                    .map(Into::into)
-                    .collect::<Vec<_>>(),
-                F::ONE.into(),
-                Direction::Receive,
-            )],
+                    once(symbolic_main_local.timestamp.clone())
+                        .chain(once(symbolic_main_local.memory_type))
+                        .chain(symbolic_main_local.address.into_iter())
+                        .chain(symbolic_main_local.read.into_iter())
+                        .chain(symbolic_main_local.write.into_iter())
+                        .map(Into::into)
+                        .collect::<Vec<_>>(),
+                    (Into::<p3_air::SymbolicExpression<F>>::into(F::ONE)
+                        - symbolic_main_local.is_padding.clone())
+                    .into(),
+                    Direction::Receive,
+                )],
         ));
 
         lookups
