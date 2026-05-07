@@ -10,6 +10,7 @@ pub enum MemoryType {
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
+    Add { rd: u8, rs1: u8, rs2: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +143,37 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Add { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val.wrapping_add(rs2_val);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -178,6 +210,14 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::XorI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b000
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Add { rd, rs1, rs2 }
         } else {
             unimplemented!("not supported");
         }
@@ -193,6 +233,11 @@ mod tests {
     fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
         let word =
             ((imm as u32 & 0xFFF) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_add(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+        let word = ((rs2 as u32) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b011_0011;
         word.to_le_bytes()
     }
 
@@ -368,6 +413,47 @@ mod tests {
                 ),
             }
         }
+    }
+
+    // add x3, x1, x2 → read x1 (ts=0), read x2 (ts=1), write x3 (ts=2)
+    #[test]
+    fn add_logs_two_reads_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+        program.extend_from_slice(&encode_addi(2, 0, 7));  // x2 = 7
+        program.extend_from_slice(&encode_add(3, 1, 2));   // x3 = x1 + x2 = 17
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        // 2 ops for addi x1, 2 ops for addi x2, 3 ops for add x3
+        assert_eq!(ops.len(), 7);
+
+        assert!(matches!(
+            ops[4],
+            MemoryOperation::Read { address: 1, timestamp: 4, value: 10, .. }
+        ));
+        assert!(matches!(
+            ops[5],
+            MemoryOperation::Read { address: 2, timestamp: 5, value: 7, .. }
+        ));
+        assert!(matches!(
+            ops[6],
+            MemoryOperation::Write { address: 3, timestamp: 6, old_value: 0, new_value: 17, .. }
+        ));
+    }
+
+    #[test]
+    fn add_wrapping_overflow() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+        program.extend_from_slice(&encode_addi(2, 0, 1));      // x2 = 1
+        program.extend_from_slice(&encode_add(3, 1, 2));        // x3 = 0 (wraps)
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[3], 0);
     }
 
     fn print_regs(regs: &[u32; 32]) {
