@@ -45,7 +45,8 @@ impl<T> Borrow<TimestampLessThanColumns<T>> for [T] {
 impl<T> BorrowMut<TimestampLessThanColumns<T>> for [T] {
     fn borrow_mut(&mut self) -> &mut TimestampLessThanColumns<T> {
         debug_assert_eq!(self.len(), NUM_COLS);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<TimestampLessThanColumns<T>>() };
+        let (prefix, shorts, suffix) =
+            unsafe { self.align_to_mut::<TimestampLessThanColumns<T>>() };
         debug_assert!(prefix.is_empty(), "Alignment should match");
         debug_assert!(suffix.is_empty(), "Alignment should match");
         debug_assert_eq!(shorts.len(), 1);

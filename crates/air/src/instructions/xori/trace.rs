@@ -35,30 +35,44 @@ fn decode_xori(program: &[u8], pc: u32) -> Option<(u8, u8, u16)> {
 }
 
 /// Collect all XORI execution steps from the VM trace.
-fn extract_xori_steps(
-    program: &[u8],
-    steps: &[(VMState, Vec<MemoryOperation>)],
-) -> Vec<XoriStep> {
+fn extract_xori_steps(program: &[u8], steps: &[(VMState, Vec<MemoryOperation>)]) -> Vec<XoriStep> {
     steps
         .iter()
         .filter_map(|(state, ops)| {
             let (rd, rs1, imm) = decode_xori(program, state.pc)?;
             // XORI emits exactly [Read(rs1), Write(rd)].
             let (timestamp, rs1_value, old_rd_value, rd_new_value) = match ops.as_slice() {
-                [MemoryOperation::Read { timestamp, value, .. },
-                 MemoryOperation::Write { old_value, new_value, .. }] => {
-                    (*timestamp, *value, *old_value, *new_value)
-                }
+                [MemoryOperation::Read {
+                    timestamp, value, ..
+                }, MemoryOperation::Write {
+                    old_value,
+                    new_value,
+                    ..
+                }] => (*timestamp, *value, *old_value, *new_value),
                 _ => return None,
             };
-            Some(XoriStep { pc: state.pc, timestamp, rd, rs1, imm, rs1_value, old_rd_value, rd_new_value })
+            Some(XoriStep {
+                pc: state.pc,
+                timestamp,
+                rd,
+                rs1,
+                imm,
+                rs1_value,
+                old_rd_value,
+                rd_new_value,
+            })
         })
         .collect()
 }
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
     let b = v.to_le_bytes();
-    [F::from_u64(b[0] as u64), F::from_u64(b[1] as u64), F::from_u64(b[2] as u64), F::from_u64(b[3] as u64)]
+    [
+        F::from_u64(b[0] as u64),
+        F::from_u64(b[1] as u64),
+        F::from_u64(b[2] as u64),
+        F::from_u64(b[3] as u64),
+    ]
 }
 
 /// Carry bits produced when computing `pc + 4` byte by byte (matching `u32_plus_four`).

@@ -90,7 +90,9 @@ impl<F: Field> LookupAir<F> for ProgramAir {
         vec![self.register_lookup(
             Kind::Global(String::from("program")),
             &vec![(
-                symbolic_main_local.address.into_iter()
+                symbolic_main_local
+                    .address
+                    .into_iter()
                     .chain(once(symbolic_main_local.value))
                     .map(Into::into)
                     .collect(),
