@@ -10,6 +10,7 @@ pub enum MemoryType {
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
+    OriI { rd: u8, rs1: u8, imm: i16 },
     Add { rd: u8, rs1: u8, rs2: u8 },
     Sub { rd: u8, rs1: u8, rs2: u8 },
     Xor { rd: u8, rs1: u8, rs2: u8 },
@@ -126,6 +127,29 @@ impl VM {
                 let rs1_val = registers[*rs1 as usize];
                 let old_rd = registers[*rd as usize];
                 let result = rs1_val ^ (*imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::OriI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val | (*imm as u32);
 
                 ops.push(MemoryOperation::Read {
                     memory_type: MemoryType::Register,
@@ -274,6 +298,11 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::XorI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b110 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::OriI { rd, rs1, imm }
         } else if bytes & 0b1111111 == 0b0110011
             && (bytes >> 12) & 0b111 == 0b000
             && (bytes >> 25) == 0b0000000
@@ -343,6 +372,15 @@ mod tests {
         let word = ((imm as u32 & 0xFFF) << 20)
             | ((rs1 as u32) << 15)
             | (0b100 << 12)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_ori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b110 << 12)
             | ((rd as u32) << 7)
             | 0b001_0011;
         word.to_le_bytes()
@@ -669,6 +707,50 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // ori x2, x1, imm → read x1, write x2 with x1 | sign_extend(imm).
+    #[test]
+    fn ori_logs_read_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+        program.extend_from_slice(&encode_ori(2, 1, 0xFF)); // x2 = 5 | 0xFF = 0xFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 5,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 0xFF,
+                ..
+            }
+        ));
+    }
+
+    // ori with negative immediate sign-extends to 32 bits.
+    #[test]
+    fn ori_sign_extended_immediate() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
+        program.extend_from_slice(&encode_ori(2, 1, -1i16)); // x2 = 0 | 0xFFFF_FFFF = 0xFFFF_FFFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], u32::MAX);
     }
 
     // xor of a register with itself should produce zero.
