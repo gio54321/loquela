@@ -1,0 +1,185 @@
+use p3_batch_stark::verify_batch;
+use p3_field::PrimeCharacteristicRing;
+
+use crate::{build_config, do_prove, generate_traces, prove, prove_traces, AllTraces, Val};
+
+fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word =
+        ((imm as u32 & 0xFFF) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b001_0011;
+    word.to_le_bytes()
+}
+
+fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b100 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+/// Prove and verify a set of (possibly modified) traces.
+/// Returns `true` if verification succeeds, `false` otherwise.
+fn prove_and_verify(traces: AllTraces) -> bool {
+    let (airs, trace_vecs) = traces.into_vecs();
+    let config = build_config();
+    let (proof, common) = do_prove(&config, &airs, &trace_vecs);
+    let pvs = vec![vec![]; airs.len()];
+    verify_batch(&config, &airs, &proof, &pvs, &common).is_ok()
+}
+
+// ── Positive tests ────────────────────────────────────────────────────────────
+
+/// Single ADDI: x1 = x0 + 1.  Exercises the bytes and trace buses.
+#[test]
+fn prove_single_addi() {
+    let program = encode_addi(1, 0, 1).to_vec();
+    prove(&program);
+}
+
+/// Single XORI: x1 = x0 ^ 0xFF.  Exercises the bytes_xor bus.
+#[test]
+fn prove_single_xori() {
+    let program = encode_xori(1, 0, 0xFF).to_vec();
+    prove(&program);
+}
+
+/// Multiple ADDI steps touching different registers; exercises the u32_lt
+/// and timestamp_lt buses through the memory sort.
+#[test]
+fn prove_addi_chain() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 1, 3)); // x2 = 8
+    program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
+    program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
+    prove(&program);
+}
+
+/// Mixed ADDI + XORI program, identical to the guest test.s fixture.
+#[test]
+fn prove_mixed_addi_xori() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0
+    program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1
+    program.extend_from_slice(&encode_xori(4, 3, -1i16)); // x4 = x3 ^ 0xFFFF_FFFF
+    program.extend_from_slice(&encode_xori(5, 2, 0x55)); // x5 = x2 ^ 0x55
+    prove(&program);
+}
+
+/// Overwriting the same register twice; checks that the memory AIR handles
+/// multiple writes at the same address in sorted order.
+#[test]
+fn prove_overwrite_register() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20
+    program.extend_from_slice(&encode_addi(1, 1, 5)); // x1 = 25
+    prove(&program);
+}
+
+/// Confirm that generate_traces + prove_traces round-trips correctly.
+#[test]
+fn generate_then_prove() {
+    let program = encode_addi(1, 0, 42).to_vec();
+    let traces = generate_traces(&program);
+    prove_traces(traces);
+}
+
+// ── Negative tests ────────────────────────────────────────────────────────────
+//
+// Each test corrupts one field in an otherwise-valid witness and asserts
+// that the resulting proof fails verification.
+//
+// BoundaryColumns layout (5 cols): [pc0, pc1, pc2, pc3, timestamp]
+// MemoryColumns layout (17 cols):
+//   [memory_type, addr0..3, timestamp, read0..3, write0..3,
+//    is_memory_type_equal, is_timestamp_equal, is_address_equal]
+// AddiColumns layout (40 cols):
+//   [pc0..3, timestamp, rd, rs1, imm, imm_high_bits0..3, imm_se_bytes0..3,
+//    rs1_value0..3, old_rd_value0..3, rd_new_value0..3, add_carries0..3,
+//    next_pc0..3, next_pc_carries0..2, is_dummy]
+
+/// Corrupt the initial PC in row 0 of the boundaries trace.
+///
+/// The boundaries AIR sends (pc, ts) = (0, 0) from row 0 onto the bus.
+/// Setting pc[0] = 1 unbalances the bus: the CPU expects an initial pc of 0.
+#[test]
+fn negative_boundaries_initial_pc() {
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+    // Row 0, col 0 = initial PC byte 0, must be 0.
+    traces.boundaries.values[0] = Val::ONE;
+    assert!(
+        !prove_and_verify(traces),
+        "corrupted initial PC should fail verification"
+    );
+}
+
+/// Corrupt rd_new_value[0] in the ADDI trace.
+///
+/// The ADDI AIR constrains rs1_value + sign_extend(imm) == rd_new_value
+/// byte-by-byte. Incrementing the low byte of rd_new_value breaks this.
+#[test]
+fn negative_addi_arithmetic() {
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+    let addi = traces.addi.as_mut().expect("program has ADDI");
+    // rd_new_value[0] is at column index 24 (see AddiColumns layout above).
+    addi.values[24] += Val::ONE;
+    assert!(
+        !prove_and_verify(traces),
+        "corrupted ADDI result should fail verification"
+    );
+}
+
+/// Corrupt write[0] in the first row of the memory trace.
+///
+/// The memory AIR exposes (address, value) pairs on the memory bus.
+/// Changing a stored write value breaks the balance with what the CPU sent.
+#[test]
+fn negative_memory_write_value() {
+    let program = encode_addi(1, 0, 5).to_vec();
+    let mut traces = generate_traces(&program);
+    // write[0] is at column index 10 (see MemoryColumns layout above).
+    traces.memory.values[10] += Val::ONE;
+    assert!(
+        !prove_and_verify(traces),
+        "corrupted memory write should fail verification"
+    );
+}
+
+/// Set `is_address_equal` to a non-boolean value (2) in a memory row.
+///
+/// The memory AIR asserts this column is boolean.  A value of 2 violates
+/// that constraint directly, regardless of the actual addresses.
+#[test]
+fn negative_nonboolean_is_address_equal() {
+    // Two writes to the same register guarantee is_address_equal == 1 somewhere.
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5));
+    program.extend_from_slice(&encode_addi(1, 1, 3));
+    let mut traces = generate_traces(&program);
+    let width = traces.memory.width; // == 17
+                                     // is_address_equal is at column index 16 within each row.
+    let col = 16;
+    let mut found = false;
+    for row in 0..traces.memory.values.len() / width {
+        let idx = row * width + col;
+        if traces.memory.values[idx] == Val::ONE {
+            // Replace the valid flag with a non-boolean field element.
+            traces.memory.values[idx] = Val::from_u64(2);
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "expected at least one row with is_address_equal == 1"
+    );
+    assert!(
+        !prove_and_verify(traces),
+        "non-boolean is_address_equal should fail verification"
+    );
+}

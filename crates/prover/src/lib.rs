@@ -1,5 +1,5 @@
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_batch_stark::{prove_batch, BatchProof, ProverData, StarkInstance};
+use p3_batch_stark::{prove_batch, BatchProof, CommonData, ProverData, StarkInstance};
 use p3_challenger::{HashChallenger, SerializingChallenger32};
 use p3_circle::CirclePcs;
 use p3_commit::ExtensionMmcs;
@@ -166,6 +166,64 @@ impl<F: Field> LookupAir<F> for LoquelAir {
     }
 }
 
+// ── AllTraces ─────────────────────────────────────────────────────────────────
+
+/// All witness matrices for a single execution, bundled with their AIR instances.
+pub struct AllTraces {
+    pub airs: Vec<LoquelAir>,
+    pub boundaries: RowMajorMatrix<Val>,
+    pub decode: RowMajorMatrix<Val>,
+    pub memory: RowMajorMatrix<Val>,
+    pub program: RowMajorMatrix<Val>,
+    pub bytes: RowMajorMatrix<Val>,
+    pub xor: RowMajorMatrix<Val>,
+    pub u32_lt: RowMajorMatrix<Val>,
+    pub timestamp_lt: RowMajorMatrix<Val>,
+    pub bytes_lt: RowMajorMatrix<Val>,
+    /// Present when the program contains ADDI instructions.
+    pub addi: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains XORI instructions.
+    pub xori: Option<RowMajorMatrix<Val>>,
+}
+
+impl AllTraces {
+    /// Flatten into parallel vecs in the same order as `airs`.
+    pub fn into_vecs(self) -> (Vec<LoquelAir>, Vec<RowMajorMatrix<Val>>) {
+        let AllTraces {
+            airs,
+            boundaries,
+            decode,
+            memory,
+            program,
+            bytes,
+            xor,
+            u32_lt,
+            timestamp_lt,
+            bytes_lt,
+            addi,
+            xori,
+        } = self;
+        let mut traces = vec![
+            boundaries,
+            decode,
+            memory,
+            program,
+            bytes,
+            xor,
+            u32_lt,
+            timestamp_lt,
+            bytes_lt,
+        ];
+        if let Some(t) = addi {
+            traces.push(t);
+        }
+        if let Some(t) = xori {
+            traces.push(t);
+        }
+        (airs, traces)
+    }
+}
+
 // ── Multiplicity helpers ───────────────────────────────────────────────────────
 
 /// Count byte occurrences across all u32 values produced by ADDI steps.
@@ -279,8 +337,11 @@ fn memory_lookup_entries(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Execute `program`, build all traces, and return a batch STARK proof.
-pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
+/// Execute `program` and build all witness matrices (without proving).
+///
+/// The returned `AllTraces` can be inspected or mutated before passing to
+/// `prove_traces`, which is useful for negative testing.
+pub fn generate_traces(program: &[u8]) -> AllTraces {
     // 1. Execute the VM.
     let mut vm = VM::new(program.to_vec());
     vm.run().expect("VM execution failed");
@@ -290,47 +351,50 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     let all_ops: Vec<MemoryOperation> = vm.get_memory_ops().into_iter().cloned().collect();
 
     // 2. Classify steps by instruction type.
-    let has_addi = steps.iter().any(|s| matches!(s.instruction, Instruction::AddI { .. }));
-    let has_xori = steps.iter().any(|s| matches!(s.instruction, Instruction::XorI { .. }));
+    let has_addi = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::AddI { .. }));
+    let has_xori = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::XorI { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
 
-    // Boundaries: 2 rows.
     let final_step = steps.last().expect("no steps");
     let final_pc_bytes = (final_step.state.pc + 4).to_le_bytes();
     let final_pc: [Val; 4] = final_pc_bytes.map(|b| Val::from_u64(b as u64));
     let final_ts = Val::from_u64(vm.timestamp as u64);
-    let boundaries_trace = punctum_air::boundaries::air::build_trace(final_pc, final_ts);
+    let boundaries = punctum_air::boundaries::air::build_trace(final_pc, final_ts);
 
-    // Decode.
-    let decode_trace = punctum_air::decode::trace::build_trace::<Val>(steps);
+    let decode = punctum_air::decode::trace::build_trace::<Val>(steps);
 
-    // AddiAir / XoriAir.
     let addi_trace = if has_addi {
-        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(steps))
+        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(
+            steps,
+        ))
     } else {
         None
     };
     let xori_trace = if has_xori {
-        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(steps))
+        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(
+            steps,
+        ))
     } else {
         None
     };
 
-    // Memory.
-    let memory_trace = punctum_air::memory::trace::build_trace::<Val>(&all_ops);
+    let memory = punctum_air::memory::trace::build_trace::<Val>(&all_ops);
 
-    // Program (still needs raw bytes for the ROM values).
     let n_decode_steps = steps.len();
-    let num_decode_padding = n_decode_steps.next_power_of_two().saturating_sub(n_decode_steps);
+    let num_decode_padding = n_decode_steps
+        .next_power_of_two()
+        .saturating_sub(n_decode_steps);
     let program_trace =
         punctum_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
 
-    // Lookup table multiplicities.
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    // Bytes bus: collect (rs1_val, rd_val) pairs from ADDI steps.
     let addi_byte_ops: Vec<(u32, u32, Val)> = steps
         .iter()
         .filter_map(|s| {
@@ -346,9 +410,8 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
         })
         .collect();
     let bytes_mults = bytes_multiplicities(&addi_byte_ops);
-    let bytes_trace = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
+    let bytes = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
-    // XOR bus: collect (rs1_byte, imm_byte, result_byte) triples per limb from XORI steps.
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
     for s in steps.iter() {
         let imm = match s.instruction {
@@ -368,16 +431,15 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
         }
     }
     let xor_mults = xor_multiplicities(&xori_triples);
-    let xor_trace = punctum_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
+    let xor = punctum_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
 
-    let u32_lt_trace =
-        punctum_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
-    let timestamp_lt_trace =
+    let u32_lt = punctum_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
+    let timestamp_lt =
         punctum_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
-    let bytes_lt_trace =
+    let bytes_lt =
         punctum_air::primitives::byte_less_than_lookup::build_trace::<Val>(&bytes_lt_mults);
 
-    // 4. Assemble AIRs and traces.
+    // 4. Assemble AIRs in the same order as the traces vec built in `into_vecs`.
     let mut airs: Vec<LoquelAir> = vec![
         LoquelAir::Boundaries(BoundariesAir::new()),
         LoquelAir::Decode(DecodeAir::new()),
@@ -389,32 +451,39 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
         LoquelAir::TimestampLt(TimestampLessThanAir::new()),
         LoquelAir::BytesLt(LessThanAir::new()),
     ];
-    let mut traces: Vec<RowMajorMatrix<Val>> = vec![
-        boundaries_trace,
-        decode_trace,
-        memory_trace,
-        program_trace,
-        bytes_trace,
-        xor_trace,
-        u32_lt_trace,
-        timestamp_lt_trace,
-        bytes_lt_trace,
-    ];
 
     if has_addi {
         airs.push(LoquelAir::Addi(AddiAir::new()));
-        traces.push(addi_trace.unwrap());
     }
     if has_xori {
         airs.push(LoquelAir::Xori(XoriAir::new()));
-        traces.push(xori_trace.unwrap());
     }
 
-    println!("Built {} AIR instances and traces", airs.len());
+    AllTraces {
+        airs,
+        boundaries,
+        decode,
+        memory,
+        program: program_trace,
+        bytes,
+        xor,
+        u32_lt,
+        timestamp_lt,
+        bytes_lt,
+        addi: addi_trace,
+        xori: xori_trace,
+    }
+}
 
-    // 5. Build prover data (handles preprocessed traces and lookups).
-    let config = build_config();
-
+/// Low-level prove: commit to `traces`, run FRI, return a batch proof.
+///
+/// Callers are responsible for ensuring `airs` and `traces` are parallel and
+/// ordered consistently (use `AllTraces::into_vecs` to guarantee this).
+fn do_prove(
+    config: &MyConfig,
+    airs: &[LoquelAir],
+    traces: &[RowMajorMatrix<Val>],
+) -> (BatchProof<MyConfig>, CommonData<MyConfig>) {
     let trace_refs: Vec<&RowMajorMatrix<Val>> = traces.iter().collect();
     let pvs: Vec<Vec<Val>> = vec![vec![]; airs.len()];
 
@@ -429,81 +498,26 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
         })
         .collect();
 
-    let prover_data = ProverData::from_instances(&config, &initial_instances);
-    let instances = StarkInstance::new_multiple(&airs, &trace_refs, &pvs, &prover_data.common);
+    println!("Building prover data ({} AIRs)...", airs.len());
+    let prover_data = ProverData::from_instances(config, &initial_instances);
+    let instances = StarkInstance::new_multiple(airs, &trace_refs, &pvs, &prover_data.common);
 
-    println!("Prepared prover data with {} instances", instances.len());
-    println!("proving...");
+    println!("Proving...");
+    let proof = prove_batch(config, &instances, &prover_data);
+    (proof, prover_data.common)
+}
 
-    // 6. Prove.
-    prove_batch(&config, &instances, &prover_data)
+/// Prove a set of traces produced by `generate_traces` (or a mutation thereof).
+pub fn prove_traces(all_traces: AllTraces) -> BatchProof<MyConfig> {
+    let (airs, traces) = all_traces.into_vecs();
+    let config = build_config();
+    do_prove(&config, &airs, &traces).0
+}
+
+/// Execute `program`, build all traces, and return a batch STARK proof.
+pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
+    prove_traces(generate_traces(program))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::prove;
-
-    fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
-        let word =
-            ((imm as u32 & 0xFFF) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b001_0011;
-        word.to_le_bytes()
-    }
-
-    fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
-        let word = ((imm as u32 & 0xFFF) << 20)
-            | ((rs1 as u32) << 15)
-            | (0b100 << 12)
-            | ((rd as u32) << 7)
-            | 0b001_0011;
-        word.to_le_bytes()
-    }
-
-    /// Single ADDI: x1 = x0 + 1.  Exercises the bytes and trace buses.
-    #[test]
-    fn prove_single_addi() {
-        let program = encode_addi(1, 0, 1).to_vec();
-        prove(&program);
-    }
-
-    /// Single XORI: x1 = x0 ^ 0xFF.  Exercises the bytes_xor bus.
-    #[test]
-    fn prove_single_xori() {
-        let program = encode_xori(1, 0, 0xFF).to_vec();
-        prove(&program);
-    }
-
-    /// Multiple ADDI steps touching different registers; exercises the u32_lt
-    /// and timestamp_lt buses through the memory sort.
-    #[test]
-    fn prove_addi_chain() {
-        let mut program = Vec::new();
-        program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
-        program.extend_from_slice(&encode_addi(2, 1, 3)); // x2 = 8
-        program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
-        program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
-        prove(&program);
-    }
-
-    /// Mixed ADDI + XORI program, identical to the guest test.s fixture.
-    #[test]
-    fn prove_mixed_addi_xori() {
-        let mut program = Vec::new();
-        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
-        program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0
-        program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1
-        program.extend_from_slice(&encode_xori(4, 3, -1i16)); // x4 = x3 ^ 0xFFFF_FFFF
-        program.extend_from_slice(&encode_xori(5, 2, 0x55)); // x5 = x2 ^ 0x55
-        prove(&program);
-    }
-
-    /// Overwriting the same register twice; checks that the memory AIR handles
-    /// multiple writes at the same address in sorted order.
-    #[test]
-    fn prove_overwrite_register() {
-        let mut program = Vec::new();
-        program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
-        program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20
-        program.extend_from_slice(&encode_addi(1, 1, 5)); // x1 = 25
-        prove(&program);
-    }
-}
+mod tests;
