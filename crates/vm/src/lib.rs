@@ -12,6 +12,7 @@ pub enum Instruction {
     XorI { rd: u8, rs1: u8, imm: i16 },
     Add { rd: u8, rs1: u8, rs2: u8 },
     Sub { rd: u8, rs1: u8, rs2: u8 },
+    Xor { rd: u8, rs1: u8, rs2: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +207,37 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Xor { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val ^ rs2_val;
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -258,6 +290,14 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let rs2 = ((bytes >> 20) & 0b11111) as u8;
             Instruction::Sub { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b100
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Xor { rd, rs1, rs2 }
         } else {
             unimplemented!("not supported");
         }
@@ -285,6 +325,15 @@ mod tests {
         let word = (0b010_0000u32 << 25)
             | ((rs2 as u32) << 20)
             | ((rs1 as u32) << 15)
+            | ((rd as u32) << 7)
+            | 0b011_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+        let word = ((rs2 as u32) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b100 << 12)
             | ((rd as u32) << 7)
             | 0b011_0011;
         word.to_le_bytes()
@@ -576,6 +625,63 @@ mod tests {
 
         let regs = vm.trace.last().unwrap().state.registers;
         assert_eq!(regs[3], 0);
+    }
+
+    // xor x3, x1, x2 → read x1 (ts=0), read x2 (ts=1), write x3 (ts=2)
+    #[test]
+    fn xor_logs_two_reads_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+        program.extend_from_slice(&encode_addi(2, 0, 0b1100)); // x2 = 0b1100
+        program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0b0110
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        // 2 ops for addi x1, 2 ops for addi x2, 3 ops for xor x3
+        assert_eq!(ops.len(), 7);
+
+        assert!(matches!(
+            ops[4],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 4,
+                value: 0b1010,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[5],
+            MemoryOperation::Read {
+                address: 2,
+                timestamp: 5,
+                value: 0b1100,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[6],
+            MemoryOperation::Write {
+                address: 3,
+                timestamp: 6,
+                old_value: 0,
+                new_value: 0b0110,
+                ..
+            }
+        ));
+    }
+
+    // xor of a register with itself should produce zero.
+    #[test]
+    fn xor_self_produces_zero() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0x7FF)); // x1 = 0x7FF
+        program.extend_from_slice(&encode_xor(2, 1, 1)); // x2 = x1 ^ x1 = 0
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], 0);
     }
 
     fn print_regs(regs: &[u32; 32]) {
