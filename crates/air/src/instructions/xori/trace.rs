@@ -25,16 +25,17 @@ fn extract_xori_steps(steps: &[ExecutionStep]) -> Vec<XoriStep> {
                 Instruction::XorI { rd, rs1, imm } => (rd, rs1, imm),
                 _ => return None,
             };
-            let (timestamp, rs1_value, old_rd_value, rd_new_value) = match step.memory_ops.as_slice() {
-                [MemoryOperation::Read {
-                    timestamp, value, ..
-                }, MemoryOperation::Write {
-                    old_value,
-                    new_value,
-                    ..
-                }] => (*timestamp, *value, *old_value, *new_value),
-                _ => return None,
-            };
+            let (timestamp, rs1_value, old_rd_value, rd_new_value) =
+                match step.memory_ops.as_slice() {
+                    [MemoryOperation::Read {
+                        timestamp, value, ..
+                    }, MemoryOperation::Write {
+                        old_value,
+                        new_value,
+                        ..
+                    }] => (*timestamp, *value, *old_value, *new_value),
+                    _ => return None,
+                };
             Some(XoriStep {
                 pc: step.state.pc,
                 timestamp,

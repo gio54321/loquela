@@ -68,10 +68,14 @@ impl<F: Field> BaseAir<F> for BoundariesAir {
         // Row 0: (1,0), Rows 1-2: (0,0), Row 3: (0,1).
         Some(RowMajorMatrix::new(
             vec![
-                F::ONE, F::ZERO, // row 0
-                F::ZERO, F::ZERO, // row 1 (padding)
-                F::ZERO, F::ZERO, // row 2 (padding)
-                F::ZERO, F::ONE, // row 3
+                F::ONE,
+                F::ZERO, // row 0
+                F::ZERO,
+                F::ZERO, // row 1 (padding)
+                F::ZERO,
+                F::ZERO, // row 2 (padding)
+                F::ZERO,
+                F::ONE, // row 3
             ],
             2,
         ))

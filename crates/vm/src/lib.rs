@@ -156,7 +156,10 @@ impl VM {
 
     /// Return all memory operations in execution order, across all steps.
     pub fn get_memory_ops(&self) -> Vec<&MemoryOperation> {
-        self.trace.iter().flat_map(|s| s.memory_ops.iter()).collect()
+        self.trace
+            .iter()
+            .flat_map(|s| s.memory_ops.iter())
+            .collect()
     }
 
     /// Return the VMState snapshot (post-execution) for each executed step.
