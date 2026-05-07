@@ -54,6 +54,7 @@ impl<T> BorrowMut<TimestampLessThanColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct TimestampLessThanAir {
     num_lookups: usize,
 }
@@ -175,7 +176,7 @@ impl<F: Field> LookupAir<F> for TimestampLessThanAir {
 pub fn build_trace<F: Field + QuotientMap<u8> + QuotientMap<u32>>(
     entries: &[(u32, u32, F)],
 ) -> RowMajorMatrix<F> {
-    let height = entries.len().next_power_of_two().max(1);
+    let height = entries.len().next_power_of_two().max(4);
     let mut data = vec![F::ZERO; height * NUM_COLS];
 
     let (prefix, rows, suffix) = unsafe { data.align_to_mut::<TimestampLessThanColumns<F>>() };

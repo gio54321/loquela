@@ -7,8 +7,15 @@ use std::vec;
 /// Number of preprocessed rows: all (x, y) byte pairs (65536 = 2^16).
 const NUM_PREPROCESSED_ROWS: usize = 256 * 256;
 
+#[derive(Clone)]
 pub struct XorAir {
     num_lookups: usize,
+}
+
+impl XorAir {
+    pub fn new() -> Self {
+        Self { num_lookups: 0 }
+    }
 }
 
 impl<F: Field> BaseAir<F> for XorAir {
@@ -57,6 +64,7 @@ impl<F: Field> LookupAir<F> for XorAir {
 
         let symbolic_air_builder = SymbolicAirBuilder::<F>::new(AirLayout {
             main_width: BaseAir::<F>::width(self),
+            preprocessed_width: 3,
             ..Default::default()
         });
         let symbolic_main = symbolic_air_builder.main();

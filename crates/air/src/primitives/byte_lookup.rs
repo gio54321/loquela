@@ -7,8 +7,15 @@ use std::vec;
 /// Number of preprocessed rows: one per byte value 0..=255.
 const NUM_PREPROCESSED_ROWS: usize = 256;
 
+#[derive(Clone)]
 pub struct BytesAir {
     num_lookups: usize,
+}
+
+impl BytesAir {
+    pub fn new() -> Self {
+        Self { num_lookups: 0 }
+    }
 }
 
 impl<F: Field> BaseAir<F> for BytesAir {
@@ -47,6 +54,7 @@ impl<F: Field> LookupAir<F> for BytesAir {
 
         let symbolic_air_builder = SymbolicAirBuilder::<F>::new(AirLayout {
             main_width: BaseAir::<F>::width(self),
+            preprocessed_width: 1,
             ..Default::default()
         });
         let symbolic_main = symbolic_air_builder.main();

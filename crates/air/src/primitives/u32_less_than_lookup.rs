@@ -46,8 +46,15 @@ impl<T> BorrowMut<U32LessThanColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct U32LessThanAir {
     num_lookups: usize,
+}
+
+impl U32LessThanAir {
+    pub fn new() -> Self {
+        Self { num_lookups: 0 }
+    }
 }
 
 impl<F: Field> BaseAir<F> for U32LessThanAir {
@@ -128,18 +135,18 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
 
         for i in 0..4 {
             lookups.push(self.register_lookup(
-                Kind::Global(format!("byte{}_lt", i)),
+                Kind::Global(String::from("bytes_lt")),
                 &vec![(
-                        vec![
-                            symbolic_main_local.x[i].clone(),
-                            symbolic_main_local.y[i].clone(),
-                        ]
-                        .into_iter()
-                        .map(Into::into)
-                        .collect(),
-                        symbolic_main_local.mult_lts[i].clone().into(),
-                        Direction::Send,
-                    )],
+                    vec![
+                        symbolic_main_local.x[i].clone(),
+                        symbolic_main_local.y[i].clone(),
+                    ]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                    symbolic_main_local.mult_lts[i].clone().into(),
+                    Direction::Send,
+                )],
             ));
         }
 
@@ -170,7 +177,7 @@ impl<F: Field> LookupAir<F> for U32LessThanAir {
 ///
 /// The trace is padded to the next power of two using rows with `x = y = 0, mult = 0`.
 pub fn build_trace<F: Field + QuotientMap<u8>>(entries: &[(u32, u32, F)]) -> RowMajorMatrix<F> {
-    let height = entries.len().next_power_of_two().max(1);
+    let height = entries.len().next_power_of_two().max(4);
     let mut data = vec![F::ZERO; height * NUM_COLS];
 
     let (prefix, rows, suffix) = unsafe { data.align_to_mut::<U32LessThanColumns<F>>() };
