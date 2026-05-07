@@ -17,6 +17,7 @@ use p3_uni_stark::StarkConfig;
 
 use punctum_air::boundaries::air::BoundariesAir;
 use punctum_air::decode::air::DecodeAir;
+use punctum_air::instructions::add::air::AddAir;
 use punctum_air::instructions::addi::air::AddiAir;
 use punctum_air::instructions::xori::air::XoriAir;
 use punctum_air::memory::air::MemoryAir;
@@ -68,6 +69,7 @@ fn build_config() -> MyConfig {
 pub enum LoquelAir {
     Boundaries(BoundariesAir),
     Decode(DecodeAir),
+    Add(AddAir),
     Addi(AddiAir),
     Xori(XoriAir),
     Memory(MemoryAir),
@@ -84,6 +86,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
         match self {
             LoquelAir::Boundaries(a) => BaseAir::<F>::width(a),
             LoquelAir::Decode(a) => BaseAir::<F>::width(a),
+            LoquelAir::Add(a) => BaseAir::<F>::width(a),
             LoquelAir::Addi(a) => BaseAir::<F>::width(a),
             LoquelAir::Xori(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
@@ -117,6 +120,7 @@ where
         match self {
             LoquelAir::Boundaries(a) => a.eval(builder),
             LoquelAir::Decode(a) => a.eval(builder),
+            LoquelAir::Add(a) => a.eval(builder),
             LoquelAir::Addi(a) => a.eval(builder),
             LoquelAir::Xori(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
@@ -135,6 +139,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
         match self {
             LoquelAir::Boundaries(a) => <BoundariesAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Add(a) => <AddAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
@@ -153,6 +158,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
         match self {
             LoquelAir::Boundaries(a) => <BoundariesAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Add(a) => <AddAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
@@ -180,6 +186,8 @@ pub struct AllTraces {
     pub u32_lt: RowMajorMatrix<Val>,
     pub timestamp_lt: RowMajorMatrix<Val>,
     pub bytes_lt: RowMajorMatrix<Val>,
+    /// Present when the program contains ADD instructions.
+    pub add: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains ADDI instructions.
     pub addi: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains XORI instructions.
@@ -200,6 +208,7 @@ impl AllTraces {
             u32_lt,
             timestamp_lt,
             bytes_lt,
+            add,
             addi,
             xori,
         } = self;
@@ -214,6 +223,9 @@ impl AllTraces {
             timestamp_lt,
             bytes_lt,
         ];
+        if let Some(t) = add {
+            traces.push(t);
+        }
         if let Some(t) = addi {
             traces.push(t);
         }
@@ -226,17 +238,13 @@ impl AllTraces {
 
 // ── Multiplicity helpers ───────────────────────────────────────────────────────
 
-/// Count byte occurrences across all u32 values produced by ADDI steps.
+/// Count byte occurrences across all u32 values that are byte-range-checked.
 /// Returns `mults[v]` = number of times byte value `v` appeared.
-fn bytes_multiplicities(vm_ops: &[(u32, u32, Val)]) -> [Val; 256] {
+fn bytes_multiplicities(vals: &[u32]) -> [Val; 256] {
     let mut mults = [Val::ZERO; 256];
-    for &(rs1_val, rd_val, _) in vm_ops {
-        for byte in rs1_val
-            .to_le_bytes()
-            .iter()
-            .chain(rd_val.to_le_bytes().iter())
-        {
-            mults[*byte as usize] += Val::ONE;
+    for v in vals {
+        for byte in v.to_le_bytes() {
+            mults[byte as usize] += Val::ONE;
         }
     }
     mults
@@ -351,6 +359,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let all_ops: Vec<MemoryOperation> = vm.get_memory_ops().into_iter().cloned().collect();
 
     // 2. Classify steps by instruction type.
+    let has_add = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Add { .. }));
     let has_addi = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::AddI { .. }));
@@ -369,6 +380,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
 
     let decode = punctum_air::decode::trace::build_trace::<Val>(steps);
 
+    let add_trace = if has_add {
+        Some(punctum_air::instructions::add::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
     let addi_trace = if has_addi {
         Some(punctum_air::instructions::addi::trace::build_trace::<Val>(
             steps,
@@ -395,21 +413,28 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
 
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    let addi_byte_ops: Vec<(u32, u32, Val)> = steps
-        .iter()
-        .filter_map(|s| {
-            if !matches!(s.instruction, Instruction::AddI { .. }) {
-                return None;
+    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new)
+    // and ADD (rs1, rs2, rd_new).
+    let mut byte_checked_vals: Vec<u32> = Vec::new();
+    for s in steps.iter() {
+        match s.memory_ops.as_slice() {
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::AddI { .. }) =>
+            {
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rd);
             }
-            match s.memory_ops.as_slice() {
-                [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] => {
-                    Some((*rs1, *rd, Val::ONE))
-                }
-                _ => None,
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Add { .. }) =>
+            {
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                byte_checked_vals.push(*rd);
             }
-        })
-        .collect();
-    let bytes_mults = bytes_multiplicities(&addi_byte_ops);
+            _ => {}
+        }
+    }
+    let bytes_mults = bytes_multiplicities(&byte_checked_vals);
     let bytes = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
@@ -452,6 +477,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         LoquelAir::BytesLt(LessThanAir::new()),
     ];
 
+    if has_add {
+        airs.push(LoquelAir::Add(AddAir::new()));
+    }
     if has_addi {
         airs.push(LoquelAir::Addi(AddiAir::new()));
     }
@@ -470,6 +498,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         u32_lt,
         timestamp_lt,
         bytes_lt,
+        add: add_trace,
         addi: addi_trace,
         xori: xori_trace,
     }
