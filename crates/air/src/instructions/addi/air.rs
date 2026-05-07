@@ -51,6 +51,10 @@ pub struct AddiColumns<F> {
     pub next_pc: [F; 4],
     /// Carry bits for the `pc + 4` addition (bytes 0–2 only; top carry is dropped).
     pub next_pc_carries: [F; 3],
+
+    /// Padding selector: 1 for real execution rows, 0 for dummy/padding rows.
+    /// When zero, all lookup multiplicities are zero (lookups disabled).
+    pub is_dummy: F,
 }
 
 pub const NUM_ADDI_COLS: usize = size_of::<AddiColumns<u8>>();
@@ -77,6 +81,7 @@ impl<T> BorrowMut<AddiColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct AddiAir {
     num_lookups: usize,
 }
@@ -107,6 +112,8 @@ where
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &AddiColumns<AB::Var> = main.current_slice().borrow();
+
+        builder.assert_bool(local.is_dummy.clone());
 
         // Constrain next_pc = pc + 4 with carry propagation.
         u32_plus_four(builder, &local.pc, &local.next_pc, &local.next_pc_carries);
@@ -183,7 +190,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
                     .chain(once(local.timestamp))
                     .map(Into::into)
                     .collect(),
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Receive,
             )],
         ));
@@ -195,7 +202,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
                 once(F::from_u64(InstructionId::Addi as u64).into())
                     .chain([local.rd, local.rs1, local.imm].into_iter().map(Into::into))
                     .collect(),
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));
@@ -213,7 +220,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
                     .chain(local.rs1_value.into_iter().map(Into::into))
                     .chain(local.rs1_value.into_iter().map(Into::into))
                     .collect(),
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));
@@ -229,7 +236,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
                     .chain(local.old_rd_value.into_iter().map(Into::into))
                     .chain(local.rd_new_value.into_iter().map(Into::into))
                     .collect(),
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));
@@ -260,7 +267,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
                     .map(Into::into)
                     .chain(once((local.timestamp.clone() + F::from_u64(2)).into()))
                     .collect(),
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));

@@ -112,6 +112,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut XoriColumns<F>, step: &XoriSte
     row.old_rd_value = u32_to_limbs(step.old_rd_value);
     row.rd_new_value = u32_to_limbs(step.rd_new_value);
 
+    row.is_dummy = F::ONE;
+
     row.next_pc = u32_to_limbs(step.pc + 4);
     let carries = pc_plus4_carries(step.pc);
     row.next_pc_carries = [
@@ -137,6 +139,7 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut XoriColumns<F>) {
         rd_new_value: [F::ZERO; 4],
         next_pc: [F::from_u64(4), F::ZERO, F::ZERO, F::ZERO],
         next_pc_carries: [F::ZERO; 3],
+        is_dummy: F::ZERO,
     };
 }
 
@@ -152,7 +155,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     let xori_steps = extract_xori_steps(program, steps);
     assert!(!xori_steps.is_empty(), "no XORI steps found in trace");
 
-    let num_rows = xori_steps.len().next_power_of_two();
+    let num_rows = xori_steps.len().next_power_of_two().max(4);
     let mut values = vec![F::ZERO; num_rows * NUM_XORI_COLS];
 
     let (prefix, rows, suffix) = unsafe { values.align_to_mut::<XoriColumns<F>>() };

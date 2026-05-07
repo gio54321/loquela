@@ -135,6 +135,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>, step: &AddiSte
         F::from_u64(carries[3] as u64),
     ];
 
+    row.is_dummy = F::ONE;
+
     row.next_pc = u32_to_limbs(step.pc + 4);
     let carries = pc_plus4_carries(step.pc);
     row.next_pc_carries = [
@@ -162,6 +164,7 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>) {
         add_carries: [F::ZERO; 4],
         next_pc: [F::from_u64(4), F::ZERO, F::ZERO, F::ZERO],
         next_pc_carries: [F::ZERO; 3],
+        is_dummy: F::ZERO,
     };
 }
 
@@ -177,7 +180,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     let addi_steps = extract_addi_steps(program, steps);
     assert!(!addi_steps.is_empty(), "no ADDI steps found in trace");
 
-    let num_rows = addi_steps.len().next_power_of_two();
+    let num_rows = addi_steps.len().next_power_of_two().max(4);
     let mut values = vec![F::ZERO; num_rows * NUM_ADDI_COLS];
 
     let (prefix, rows, suffix) = unsafe { values.align_to_mut::<AddiColumns<F>>() };
