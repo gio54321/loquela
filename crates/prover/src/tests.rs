@@ -14,6 +14,16 @@ fn encode_add(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_sub(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    // funct7=0b0100000 occupies bits 25..32; bit 30 (funct7 bit 5) is set.
+    let word = (0b010_0000u32 << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     let word = ((imm as u32 & 0xFFF) << 20)
         | ((rs1 as u32) << 15)
@@ -185,6 +195,37 @@ fn negative_memory_write_value() {
         !prove_and_verify(traces),
         "corrupted memory write should fail verification"
     );
+}
+
+/// Single SUB: x3 = x1 - x2. Exercises the register-register subtraction path.
+#[test]
+fn prove_single_sub() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 7
+    prove(&program);
+}
+
+/// SUB wrapping underflow: 0 - 1 = 0xFFFF_FFFF.
+#[test]
+fn prove_sub_wrapping() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 0xFFFF_FFFF (wraps)
+    prove(&program);
+}
+
+/// Mixed ADD + SUB: exercises both R-type instructions together.
+#[test]
+fn prove_mixed_add_sub() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 27
+    program.extend_from_slice(&encode_sub(4, 3, 2)); // x4 = 20
+    prove(&program);
 }
 
 /// Set `is_address_equal` to a non-boolean value (2) in a memory row.
