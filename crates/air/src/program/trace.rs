@@ -1,6 +1,6 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use punctum_vm::{MemoryOperation, VMState};
+use punctum_vm::ExecutionStep;
 
 use super::air::{ProgramColumns, NUM_MEMORY_COLS};
 
@@ -38,7 +38,7 @@ fn inc_carries(addr: u32) -> [u8; 4] {
 /// decode-trace padding rows; pass 0 if not accounting for padding.
 pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     program: &[u8],
-    steps: &[(VMState, Vec<MemoryOperation>)],
+    steps: &[ExecutionStep],
     num_decode_padding: usize,
 ) -> RowMajorMatrix<F> {
     let n_bytes = program.len();
@@ -46,9 +46,9 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     let num_rows = n_bytes.next_power_of_two().max(4);
 
     let mut mults = vec![0usize; num_rows];
-    for (state, _) in steps {
+    for step in steps {
         for i in 0..4 {
-            let addr = state.pc as usize + i;
+            let addr = step.state.pc as usize + i;
             if addr < num_rows {
                 mults[addr] += 1;
             }

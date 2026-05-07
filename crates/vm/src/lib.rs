@@ -6,7 +6,7 @@ pub enum MemoryType {
     Ram = 1,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
@@ -37,12 +37,26 @@ pub enum MemoryOperation {
     },
 }
 
+/// One executed step: the VM state after execution, the raw instruction word,
+/// the decoded instruction, and all memory operations emitted during the step.
+#[derive(Debug, Clone)]
+pub struct ExecutionStep {
+    /// Register state after execution; PC is the address of this instruction.
+    pub state: VMState,
+    /// Raw 32-bit instruction word fetched from the program ROM.
+    pub instruction_word: u32,
+    /// Decoded instruction (same information, typed).
+    pub instruction: Instruction,
+    /// Memory operations emitted in program order during this step.
+    pub memory_ops: Vec<MemoryOperation>,
+}
+
 pub struct VM {
     pub program: Vec<u8>,
     pub memory: HashMap<u32, u32>,
     pub pc: u32,
     pub timestamp: u32,
-    pub trace: Vec<(VMState, Vec<MemoryOperation>)>,
+    pub trace: Vec<ExecutionStep>,
 }
 
 impl VM {
@@ -64,88 +78,93 @@ impl VM {
     }
 
     pub fn step(&mut self) -> Result<(), String> {
-        // Snapshot current register state for this step's trace entry.
-        let current_registers = self
+        let mut registers = self
             .trace
             .last()
-            .map(|(s, _)| s.registers)
+            .map(|s| s.state.registers)
             .unwrap_or([0u32; 32]);
-        self.trace
-            .push((VMState { pc: self.pc, registers: current_registers }, Vec::new()));
 
-        let pc = self.pc as usize;
-        let word = u32::from_le_bytes([
-            self.program[pc],
-            self.program[pc + 1],
-            self.program[pc + 2],
-            self.program[pc + 3],
+        let pc = self.pc;
+        let off = pc as usize;
+        let instruction_word = u32::from_le_bytes([
+            self.program[off],
+            self.program[off + 1],
+            self.program[off + 2],
+            self.program[off + 3],
         ]);
-        let decoded = Self::decode_instruction(word);
+        let instruction = Self::decode_instruction(instruction_word);
+
         let mut ops = Vec::new();
-        match decoded {
+        match &instruction {
             Instruction::AddI { rd, rs1, imm } => {
-                let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
-                let old_rd = self.trace.last().unwrap().0.registers[rd as usize];
-                let result = rs1_val.wrapping_add(imm as u32);
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val.wrapping_add(*imm as u32);
 
                 ops.push(MemoryOperation::Read {
                     memory_type: MemoryType::Register,
-                    address: rs1 as u32,
+                    address: *rs1 as u32,
                     timestamp: self.timestamp,
                     value: rs1_val,
                 });
                 self.timestamp += 1;
                 ops.push(MemoryOperation::Write {
                     memory_type: MemoryType::Register,
-                    address: rd as u32,
+                    address: *rd as u32,
                     timestamp: self.timestamp,
                     old_value: old_rd,
                     new_value: result,
                 });
                 self.timestamp += 1;
 
-                self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
+                registers[*rd as usize] = result;
             }
             Instruction::XorI { rd, rs1, imm } => {
-                let rs1_val = self.trace.last().unwrap().0.registers[rs1 as usize];
-                let old_rd = self.trace.last().unwrap().0.registers[rd as usize];
-                let result = rs1_val ^ (imm as u32);
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val ^ (*imm as u32);
 
                 ops.push(MemoryOperation::Read {
                     memory_type: MemoryType::Register,
-                    address: rs1 as u32,
+                    address: *rs1 as u32,
                     timestamp: self.timestamp,
                     value: rs1_val,
                 });
                 self.timestamp += 1;
                 ops.push(MemoryOperation::Write {
                     memory_type: MemoryType::Register,
-                    address: rd as u32,
+                    address: *rd as u32,
                     timestamp: self.timestamp,
                     old_value: old_rd,
                     new_value: result,
                 });
                 self.timestamp += 1;
 
-                self.trace.last_mut().unwrap().0.registers[rd as usize] = result;
+                registers[*rd as usize] = result;
             }
         }
-        self.trace.last_mut().unwrap().1.extend(ops);
+
+        self.trace.push(ExecutionStep {
+            state: VMState { pc, registers },
+            instruction_word,
+            instruction,
+            memory_ops: ops,
+        });
         self.pc += 4;
         Ok(())
     }
 
     /// Return all memory operations in execution order, across all steps.
     pub fn get_memory_ops(&self) -> Vec<&MemoryOperation> {
-        self.trace.iter().flat_map(|(_, ops)| ops.iter()).collect()
+        self.trace.iter().flat_map(|s| s.memory_ops.iter()).collect()
     }
 
-    /// Return the VMState snapshot at the start of each executed step.
+    /// Return the VMState snapshot (post-execution) for each executed step.
     pub fn get_trace(&self) -> Vec<VMState> {
-        self.trace.iter().map(|(state, _)| state.clone()).collect()
+        self.trace.iter().map(|s| s.state.clone()).collect()
     }
 
-    fn decode_instruction(bytes: u32) -> Instruction {
+    pub fn decode_instruction(bytes: u32) -> Instruction {
         if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b000 {
             let rd = ((bytes >> 7) & 0b11111) as u8;
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
@@ -160,7 +179,6 @@ impl VM {
             unimplemented!("not supported");
         }
     }
-
 }
 
 #[cfg(test)]
@@ -374,29 +392,21 @@ mod tests {
         let mut step_idx = 0;
         while (vm.pc as usize) < vm.program.len() {
             let pc_before = vm.pc;
-            let word = u32::from_le_bytes([
-                vm.program[pc_before as usize],
-                vm.program[pc_before as usize + 1],
-                vm.program[pc_before as usize + 2],
-                vm.program[pc_before as usize + 3],
-            ]);
-            let instr = VM::decode_instruction(word);
-
             vm.step().expect("step failed");
 
-            let state = &vm.trace.last().unwrap().0;
+            let step = vm.trace.last().unwrap();
             println!(
                 "== step {} == pc 0x{:08x} -> 0x{:08x}  {:08x}  {:?}",
-                step_idx, pc_before, vm.pc, word, instr
+                step_idx, pc_before, vm.pc, step.instruction_word, step.instruction
             );
-            print_regs(&state.registers);
+            print_regs(&step.state.registers);
             step_idx += 1;
         }
 
         // Sanity-check final register values for the program in test.s:
         //   addi x1, x1, -1  ; addi x2, x2, 0  ; addi x3, x3, 1
         //   xori x4, x3, -1  ; xori x5, x2, 0x55
-        let regs = vm.trace.last().unwrap().0.registers;
+        let regs = vm.trace.last().unwrap().state.registers;
         assert_eq!(regs[1], u32::MAX);
         assert_eq!(regs[2], 0);
         assert_eq!(regs[3], 1);

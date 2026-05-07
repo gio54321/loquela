@@ -1,6 +1,6 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use punctum_vm::{MemoryOperation, VMState};
+use punctum_vm::{ExecutionStep, Instruction, MemoryOperation};
 
 use super::air::{XoriColumns, NUM_XORI_COLS};
 
@@ -9,39 +9,23 @@ struct XoriStep {
     timestamp: u32,
     rd: u8,
     rs1: u8,
-    /// Unsigned 12-bit immediate (bits 20–31 of the instruction word).
-    imm: u16,
+    /// Sign-extended 12-bit immediate (already sign-extended by the VM decoder).
+    imm: i16,
     rs1_value: u32,
     old_rd_value: u32,
     rd_new_value: u32,
 }
 
-/// Decode the instruction at `pc` in `program`, returning `(rd, rs1, imm_unsigned_12)`
-/// if it is a XORI, or `None` otherwise.
-fn decode_xori(program: &[u8], pc: u32) -> Option<(u8, u8, u16)> {
-    let off = pc as usize;
-    if off + 4 > program.len() {
-        return None;
-    }
-    let word = u32::from_le_bytes(program[off..off + 4].try_into().unwrap());
-    if word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100 {
-        let rd = ((word >> 7) & 0x1F) as u8;
-        let rs1 = ((word >> 15) & 0x1F) as u8;
-        let imm = ((word >> 20) & 0xFFF) as u16;
-        Some((rd, rs1, imm))
-    } else {
-        None
-    }
-}
-
 /// Collect all XORI execution steps from the VM trace.
-fn extract_xori_steps(program: &[u8], steps: &[(VMState, Vec<MemoryOperation>)]) -> Vec<XoriStep> {
+fn extract_xori_steps(steps: &[ExecutionStep]) -> Vec<XoriStep> {
     steps
         .iter()
-        .filter_map(|(state, ops)| {
-            let (rd, rs1, imm) = decode_xori(program, state.pc)?;
-            // XORI emits exactly [Read(rs1), Write(rd)].
-            let (timestamp, rs1_value, old_rd_value, rd_new_value) = match ops.as_slice() {
+        .filter_map(|step| {
+            let (rd, rs1, imm) = match step.instruction {
+                Instruction::XorI { rd, rs1, imm } => (rd, rs1, imm),
+                _ => return None,
+            };
+            let (timestamp, rs1_value, old_rd_value, rd_new_value) = match step.memory_ops.as_slice() {
                 [MemoryOperation::Read {
                     timestamp, value, ..
                 }, MemoryOperation::Write {
@@ -52,7 +36,7 @@ fn extract_xori_steps(program: &[u8], steps: &[(VMState, Vec<MemoryOperation>)])
                 _ => return None,
             };
             Some(XoriStep {
-                pc: state.pc,
+                pc: step.state.pc,
                 timestamp,
                 rd,
                 rs1,
@@ -93,10 +77,13 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut XoriColumns<F>, step: &XoriSte
     row.timestamp = F::from_u64(step.timestamp as u64);
     row.rd = F::from_u64(step.rd as u64);
     row.rs1 = F::from_u64(step.rs1 as u64);
-    row.imm = F::from_u64(step.imm as u64);
+
+    // Store the unsigned 12-bit immediate in the column.
+    let imm_u12 = (step.imm as u16) & 0xFFF;
+    row.imm = F::from_u64(imm_u12 as u64);
 
     // Bit decomposition of bits 8–11 of imm (the high nibble).
-    let high_nibble = (step.imm >> 8) & 0xF;
+    let high_nibble = (imm_u12 >> 8) & 0xF;
     row.imm_high_bits = [
         F::from_u64(((high_nibble >> 0) & 1) as u64),
         F::from_u64(((high_nibble >> 1) & 1) as u64),
@@ -105,7 +92,7 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut XoriColumns<F>, step: &XoriSte
     ];
 
     // Sign-extend the 12-bit immediate to 32 bits.
-    let imm_se = ((step.imm as i16) << 4 >> 4) as i32 as u32;
+    let imm_se = step.imm as i32 as u32;
     row.imm_se_bytes = u32_to_limbs(imm_se);
 
     row.rs1_value = u32_to_limbs(step.rs1_value);
@@ -143,16 +130,13 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut XoriColumns<F>) {
     };
 }
 
-/// Build the XORI execution trace from the raw VM trace.
+/// Build the XORI execution trace from the VM execution steps.
 ///
-/// Filters all XORI steps from `steps`, fills one row per step, and pads
-/// to the next power of two.  The input `program` is needed to re-decode
-/// each instruction and verify it is a XORI.
+/// Filters all XORI steps, fills one row per step, and pads to the next power of two.
 pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
-    program: &[u8],
-    steps: &[(VMState, Vec<MemoryOperation>)],
+    steps: &[ExecutionStep],
 ) -> DenseMatrix<F> {
-    let xori_steps = extract_xori_steps(program, steps);
+    let xori_steps = extract_xori_steps(steps);
     assert!(!xori_steps.is_empty(), "no XORI steps found in trace");
 
     let num_rows = xori_steps.len().next_power_of_two().max(4);

@@ -26,7 +26,7 @@ use punctum_air::primitives::timestamp_less_than::TimestampLessThanAir;
 use punctum_air::primitives::u32_less_than_lookup::U32LessThanAir;
 use punctum_air::primitives::xor_lookup::XorAir;
 use punctum_air::program::air::ProgramAir;
-use punctum_vm::{MemoryOperation, VM};
+use punctum_vm::{Instruction, MemoryOperation, VM};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -188,7 +188,6 @@ fn bytes_multiplicities(vm_ops: &[(u32, u32, Val)]) -> [Val; 256] {
 fn xor_multiplicities(xori_ops: &[(u32, u32, u32)]) -> Vec<Val> {
     let mut mults = vec![Val::ZERO; 256 * 256];
     for &(x, y, _) in xori_ops {
-        // x and y are single bytes (rs1 byte and imm byte for each limb)
         mults[x as usize * 256 + y as usize] += Val::ONE;
     }
     mults
@@ -203,7 +202,6 @@ fn memory_lookup_entries(
     Vec<(u32, u32, Val)>, // timestamp_lt entries: (ts_x, ts_y, mult)
     Vec<Val>,             // bytes_lt mults (length <= 32640)
 ) {
-    // Normalise into (type, address, timestamp, read, write) tuples and sort.
     struct Op {
         memory_type: u8,
         address: u32,
@@ -238,8 +236,6 @@ fn memory_lookup_entries(
 
     let mut u32_lt_entries: Vec<(u32, u32, Val)> = Vec::new();
     let mut timestamp_lt_entries: Vec<(u32, u32, Val)> = Vec::new();
-
-    // bytes_lt: row index = y*(y-1)/2 + x where x < y
     let mut bytes_lt_mults_map = std::collections::HashMap::<(u8, u8), u64>::new();
 
     for i in 0..ops.len().saturating_sub(1) {
@@ -252,15 +248,11 @@ fn memory_lookup_entries(
         }
 
         let is_addr_equal = cur.address == nxt.address;
-
-        // u32_lt lookup: (cur.address, nxt.address, is_addr_equal) with mult=1
         u32_lt_entries.push((cur.address, nxt.address, Val::ONE));
 
-        // bytes_lt: the first differing byte limb (if addr differs)
         if !is_addr_equal {
             let x_bytes = cur.address.to_le_bytes();
             let y_bytes = nxt.address.to_le_bytes();
-            // Find most significant differing byte (byte index 3 down to 0)
             for b in (0..4).rev() {
                 if x_bytes[b] != y_bytes[b] {
                     let (lo, hi) = (x_bytes[b].min(y_bytes[b]), x_bytes[b].max(y_bytes[b]));
@@ -270,14 +262,11 @@ fn memory_lookup_entries(
             }
         }
 
-        // timestamp_lt: only when addresses are equal
         if is_addr_equal {
             timestamp_lt_entries.push((cur.timestamp, nxt.timestamp, Val::ONE));
         }
     }
 
-    // Convert bytes_lt map to LessThanAir multiplicity slice.
-    // LessThanAir row index = y*(y-1)/2 + x (y in 0..256, x in 0..y).
     let num_valid = 256 * 255 / 2;
     let mut bytes_lt_mults = vec![Val::ZERO; num_valid];
     for ((x, y), count) in &bytes_lt_mults_map {
@@ -300,49 +289,31 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     println!("VM executed in {} steps", steps.len());
     let all_ops: Vec<MemoryOperation> = vm.get_memory_ops().into_iter().cloned().collect();
 
-    // 2. Classify steps.
-    let has_addi = steps.iter().any(|(state, _)| {
-        let pc = state.pc as usize;
-        if pc + 4 > program.len() {
-            return false;
-        }
-        let w = u32::from_le_bytes(program[pc..pc + 4].try_into().unwrap());
-        w & 0x7F == 0b001_0011 && (w >> 12) & 0x7 == 0b000
-    });
-    let has_xori = steps.iter().any(|(state, _)| {
-        let pc = state.pc as usize;
-        if pc + 4 > program.len() {
-            return false;
-        }
-        let w = u32::from_le_bytes(program[pc..pc + 4].try_into().unwrap());
-        w & 0x7F == 0b001_0011 && (w >> 12) & 0x7 == 0b100
-    });
+    // 2. Classify steps by instruction type.
+    let has_addi = steps.iter().any(|s| matches!(s.instruction, Instruction::AddI { .. }));
+    let has_xori = steps.iter().any(|s| matches!(s.instruction, Instruction::XorI { .. }));
 
     // 3. Build traces.
-
     println!("Building AIR instances and traces...");
+
     // Boundaries: 2 rows.
-    let final_state = steps.last().expect("no steps");
-    let final_pc_bytes = (final_state.0.pc + 4).to_le_bytes();
+    let final_step = steps.last().expect("no steps");
+    let final_pc_bytes = (final_step.state.pc + 4).to_le_bytes();
     let final_pc: [Val; 4] = final_pc_bytes.map(|b| Val::from_u64(b as u64));
     let final_ts = Val::from_u64(vm.timestamp as u64);
     let boundaries_trace = punctum_air::boundaries::air::build_trace(final_pc, final_ts);
 
     // Decode.
-    let decode_trace = punctum_air::decode::trace::build_trace::<Val>(program, steps);
+    let decode_trace = punctum_air::decode::trace::build_trace::<Val>(steps);
 
     // AddiAir / XoriAir.
     let addi_trace = if has_addi {
-        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(
-            program, steps,
-        ))
+        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(steps))
     } else {
         None
     };
     let xori_trace = if has_xori {
-        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(
-            program, steps,
-        ))
+        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(steps))
     } else {
         None
     };
@@ -350,25 +321,23 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     // Memory.
     let memory_trace = punctum_air::memory::trace::build_trace::<Val>(&all_ops);
 
-    // Program.
+    // Program (still needs raw bytes for the ROM values).
     let n_decode_steps = steps.len();
-    let n_decode_rows = n_decode_steps.next_power_of_two();
-    let num_decode_padding = n_decode_rows - n_decode_steps;
+    let num_decode_padding = n_decode_steps.next_power_of_two().saturating_sub(n_decode_steps);
     let program_trace =
         punctum_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
 
     // Lookup table multiplicities.
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    // Collect ADDI (rs1_val, rd_val) pairs for bytes bus.
+    // Bytes bus: collect (rs1_val, rd_val) pairs from ADDI steps.
     let addi_byte_ops: Vec<(u32, u32, Val)> = steps
         .iter()
-        .filter_map(|(state, ops)| {
-            let pc = state.pc as usize;
-            if pc + 4 > program.len() { return None; }
-            let w = u32::from_le_bytes(program[pc..pc+4].try_into().unwrap());
-            if w & 0x7F != 0b001_0011 || (w >> 12) & 0x7 != 0b000 { return None; }
-            match ops.as_slice() {
+        .filter_map(|s| {
+            if !matches!(s.instruction, Instruction::AddI { .. }) {
+                return None;
+            }
+            match s.memory_ops.as_slice() {
                 [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] => {
                     Some((*rs1, *rd, Val::ONE))
                 }
@@ -379,21 +348,16 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     let bytes_mults = bytes_multiplicities(&addi_byte_ops);
     let bytes_trace = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
-    // Collect XORI (rs1_byte, imm_byte, result_byte) triples per limb for xor bus.
+    // XOR bus: collect (rs1_byte, imm_byte, result_byte) triples per limb from XORI steps.
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
-    for (state, ops) in steps.iter() {
-        let pc = state.pc as usize;
-        if pc + 4 > program.len() {
-            continue;
-        }
-        let w = u32::from_le_bytes(program[pc..pc + 4].try_into().unwrap());
-        if w & 0x7F != 0b001_0011 || (w >> 12) & 0x7 != 0b100 {
-            continue;
-        }
-        let imm_raw = ((w >> 20) & 0xFFF) as u16;
-        let imm_se = ((imm_raw as i16) << 4 >> 4) as i32 as u32;
+    for s in steps.iter() {
+        let imm = match s.instruction {
+            Instruction::XorI { imm, .. } => imm,
+            _ => continue,
+        };
+        let imm_se = imm as i32 as u32;
         if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] =
-            ops.as_slice()
+            s.memory_ops.as_slice()
         {
             let rs1_b = rs1.to_le_bytes();
             let imm_b = imm_se.to_le_bytes();
@@ -454,7 +418,6 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     let trace_refs: Vec<&RowMajorMatrix<Val>> = traces.iter().collect();
     let pvs: Vec<Vec<Val>> = vec![vec![]; airs.len()];
 
-    // Build initial instances (lookups will be filled from common data).
     let initial_instances: Vec<StarkInstance<'_, MyConfig, LoquelAir>> = airs
         .iter()
         .zip(trace_refs.iter())
@@ -467,12 +430,11 @@ pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
         .collect();
 
     let prover_data = ProverData::from_instances(&config, &initial_instances);
-
-    // Rebuild instances with correct lookups from common data.
     let instances = StarkInstance::new_multiple(&airs, &trace_refs, &pvs, &prover_data.common);
 
     println!("Prepared prover data with {} instances", instances.len());
     println!("proving...");
+
     // 6. Prove.
     prove_batch(&config, &instances, &prover_data)
 }

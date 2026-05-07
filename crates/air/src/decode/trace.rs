@@ -1,6 +1,6 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use punctum_vm::{MemoryOperation, VMState};
+use punctum_vm::ExecutionStep;
 use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
@@ -13,10 +13,7 @@ fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
     ]
 }
 
-fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, program: &[u8]) {
-    let off = pc as usize;
-    let word = u32::from_le_bytes(program[off..off + 4].try_into().unwrap());
-
+fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, word: u32) {
     row.pc = u32_to_limbs(pc);
 
     for i in 0..4 {
@@ -42,19 +39,17 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, pro
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
     };
-    // instr_type_packed: 0 for ADDI, 1 for XORI (matches the eval constraint)
     row.instr_type_packed = if is_xori { F::ONE } else { F::ZERO };
-    // Each row is consumed once by its instruction AIR.
     row.mult = F::ONE;
 }
 
 /// Build the decode trace from the VM execution steps.
 ///
 /// One row per step. The `mult` column is always 1 (each decode is consumed
-/// once by the corresponding instruction AIR).
+/// once by the corresponding instruction AIR). Padding rows reuse the first
+/// step's instruction word with mult=0 so the decode bus stays balanced.
 pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
-    program: &[u8],
-    steps: &[(VMState, Vec<MemoryOperation>)],
+    steps: &[ExecutionStep],
 ) -> RowMajorMatrix<F> {
     let num_steps = steps.len();
     assert!(num_steps > 0, "decode trace requires at least one step");
@@ -67,12 +62,13 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     assert!(suffix.is_empty(), "alignment mismatch");
     assert_eq!(rows.len(), num_rows);
 
-    for (row, (state, _)) in rows.iter_mut().zip(steps.iter()) {
-        fill_row(row, state.pc, program);
+    for (row, step) in rows.iter_mut().zip(steps.iter()) {
+        fill_row(row, step.state.pc, step.instruction_word);
     }
-    // Padding rows: reuse pc=0 with mult=0 so the decode bus stays balanced.
+    // Padding rows: reuse the first step's instruction word with mult=0.
+    let padding_word = steps[0].instruction_word;
     for row in rows.iter_mut().skip(num_steps) {
-        fill_row(row, 0, program);
+        fill_row(row, 0, padding_word);
         row.mult = F::ZERO;
     }
 
