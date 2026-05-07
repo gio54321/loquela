@@ -47,8 +47,15 @@ impl<T> BorrowMut<MemoryColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct MemoryAir {
     num_lookups: usize,
+}
+
+impl MemoryAir {
+    pub fn new() -> Self {
+        Self { num_lookups: 0 }
+    }
 }
 
 impl<F> BaseAir<F> for MemoryAir {

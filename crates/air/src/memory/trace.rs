@@ -68,7 +68,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
 
     let num_ops = ops.len();
     assert!(num_ops > 0, "memory trace must have at least one operation");
-    let num_rows = num_ops.next_power_of_two();
+    let num_rows = num_ops.next_power_of_two().max(4);
 
     let mut values = vec![F::ZERO; num_rows * NUM_COLS];
 

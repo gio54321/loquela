@@ -39,8 +39,15 @@ impl<T> BorrowMut<ProgramColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct ProgramAir {
     num_lookups: usize,
+}
+
+impl ProgramAir {
+    pub fn new() -> Self {
+        Self { num_lookups: 0 }
+    }
 }
 
 impl<F> BaseAir<F> for ProgramAir {
