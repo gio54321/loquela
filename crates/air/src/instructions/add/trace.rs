@@ -27,10 +27,10 @@ fn extract_add_steps(steps: &[ExecutionStep]) -> Vec<AddStep> {
             let (timestamp, rs1_value, rs2_value, old_rd_value, rd_new_value) =
                 match step.memory_ops.as_slice() {
                     [MemoryOperation::Read {
-                        timestamp, value: v1, ..
-                    }, MemoryOperation::Read {
-                        value: v2, ..
-                    }, MemoryOperation::Write {
+                        timestamp,
+                        value: v1,
+                        ..
+                    }, MemoryOperation::Read { value: v2, .. }, MemoryOperation::Write {
                         old_value,
                         new_value,
                         ..

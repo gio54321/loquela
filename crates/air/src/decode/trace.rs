@@ -36,9 +36,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
 
     let is_addi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b000;
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
-    let is_add = word & 0x7F == 0b011_0011
-        && (word >> 12) & 0x7 == 0b000
-        && (word >> 25) == 0b000_0000;
+    let is_add =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),

@@ -420,8 +420,8 @@ mod tests {
     fn add_logs_two_reads_then_write() {
         let mut program = Vec::new();
         program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
-        program.extend_from_slice(&encode_addi(2, 0, 7));  // x2 = 7
-        program.extend_from_slice(&encode_add(3, 1, 2));   // x3 = x1 + x2 = 17
+        program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+        program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = x1 + x2 = 17
         let mut vm = VM::new(program);
         vm.run().unwrap();
 
@@ -431,15 +431,31 @@ mod tests {
 
         assert!(matches!(
             ops[4],
-            MemoryOperation::Read { address: 1, timestamp: 4, value: 10, .. }
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 4,
+                value: 10,
+                ..
+            }
         ));
         assert!(matches!(
             ops[5],
-            MemoryOperation::Read { address: 2, timestamp: 5, value: 7, .. }
+            MemoryOperation::Read {
+                address: 2,
+                timestamp: 5,
+                value: 7,
+                ..
+            }
         ));
         assert!(matches!(
             ops[6],
-            MemoryOperation::Write { address: 3, timestamp: 6, old_value: 0, new_value: 17, .. }
+            MemoryOperation::Write {
+                address: 3,
+                timestamp: 6,
+                old_value: 0,
+                new_value: 17,
+                ..
+            }
         ));
     }
 
@@ -447,8 +463,8 @@ mod tests {
     fn add_wrapping_overflow() {
         let mut program = Vec::new();
         program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
-        program.extend_from_slice(&encode_addi(2, 0, 1));      // x2 = 1
-        program.extend_from_slice(&encode_add(3, 1, 2));        // x3 = 0 (wraps)
+        program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+        program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 0 (wraps)
         let mut vm = VM::new(program);
         vm.run().unwrap();
 

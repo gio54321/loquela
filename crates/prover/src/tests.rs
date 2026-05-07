@@ -54,8 +54,8 @@ fn prove_single_xori() {
 fn prove_single_add() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
-    program.extend_from_slice(&encode_addi(2, 0, 7));  // x2 = 7
-    program.extend_from_slice(&encode_add(3, 1, 2));   // x3 = 17
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 17
     prove(&program);
 }
 
@@ -64,8 +64,8 @@ fn prove_single_add() {
 fn prove_add_wrapping() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
-    program.extend_from_slice(&encode_addi(2, 0, 1));      // x2 = 1
-    program.extend_from_slice(&encode_add(3, 1, 2));        // x3 = 0 (wraps)
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 0 (wraps)
     prove(&program);
 }
 
@@ -73,10 +73,10 @@ fn prove_add_wrapping() {
 #[test]
 fn prove_mixed_addi_add() {
     let mut program = Vec::new();
-    program.extend_from_slice(&encode_addi(1, 0, 5));  // x1 = 5
-    program.extend_from_slice(&encode_addi(2, 0, 3));  // x2 = 3
-    program.extend_from_slice(&encode_add(3, 1, 2));   // x3 = 8
-    program.extend_from_slice(&encode_add(4, 3, 1));   // x4 = 13
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 8
+    program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 13
     program.extend_from_slice(&encode_addi(5, 4, -1)); // x5 = 12
     prove(&program);
 }
