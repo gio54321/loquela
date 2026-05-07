@@ -9,6 +9,11 @@ fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_add(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b011_0011;
+    word.to_le_bytes()
+}
+
 fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     let word = ((imm as u32 & 0xFFF) << 20)
         | ((rs1 as u32) << 15)
@@ -41,6 +46,38 @@ fn prove_single_addi() {
 #[test]
 fn prove_single_xori() {
     let program = encode_xori(1, 0, 0xFF).to_vec();
+    prove(&program);
+}
+
+/// Single ADD: x3 = x1 + x2. Exercises the register-register addition path.
+#[test]
+fn prove_single_add() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 17
+    prove(&program);
+}
+
+/// ADD wrapping overflow: 0xFFFF_FFFF + 1 = 0.
+#[test]
+fn prove_add_wrapping() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 0 (wraps)
+    prove(&program);
+}
+
+/// Mixed ADDI + ADD program exercising both I-type and R-type paths together.
+#[test]
+fn prove_mixed_addi_add() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 8
+    program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 13
+    program.extend_from_slice(&encode_addi(5, 4, -1)); // x5 = 12
     prove(&program);
 }
 

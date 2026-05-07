@@ -27,19 +27,30 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let rd = ((word >> 7) & 0x1F) as u8;
     let rs1 = ((word >> 15) & 0x1F) as u8;
     let imm = ((word >> 20) & 0xFFF) as u16;
+    let rs2 = ((word >> 20) & 0x1F) as u8;
 
     row.rd = F::from_u64(rd as u64);
     row.rs1 = F::from_u64(rs1 as u64);
     row.imm = F::from_u64(imm as u64);
+    row.rs2 = F::from_u64(rs2 as u64);
 
     let is_addi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b000;
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
+    let is_add =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
+        is_add: F::from_bool(is_add),
     };
-    row.instr_type_packed = if is_xori { F::ONE } else { F::ZERO };
+    row.instr_type_packed = if is_xori {
+        F::ONE
+    } else if is_add {
+        F::from_u64(2)
+    } else {
+        F::ZERO
+    };
     row.mult = F::ONE;
 }
 

@@ -6,7 +6,8 @@ use std::{
 
 use crate::primitives::bit_decompose::{check_bit_decomposition, pack_bits};
 use p3_air::{
-    Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicVariable, WindowAccess,
+    Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicExpression, SymbolicVariable,
+    WindowAccess,
 };
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
@@ -14,12 +15,14 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 pub struct Instruction<F> {
     pub is_addi: F,
     pub is_xori: F,
+    pub is_add: F,
 }
 
 #[repr(u8)]
 pub enum InstructionId {
     Addi = 0,
     Xori = 1,
+    Add = 2,
 }
 
 #[repr(C)]
@@ -31,7 +34,10 @@ pub struct DecodeColumns<F> {
     pub instr_type_packed: F,
     pub rd: F,
     pub rs1: F,
+    /// Unsigned 12-bit immediate (I-type). Holds bits 20–31 for ADDI/XORI; unconstrained for ADD.
     pub imm: F,
+    /// Source register 2 index (R-type). Holds bits 20–24 for all instruction types.
+    pub rs2: F,
     pub mult: F,
 }
 
@@ -93,8 +99,11 @@ where
         // is_* flags are one-hot booleans.
         builder.assert_bool(local.instr_type.is_addi.clone());
         builder.assert_bool(local.instr_type.is_xori.clone());
+        builder.assert_bool(local.instr_type.is_add.clone());
         builder.assert_eq(
-            local.instr_type.is_addi.clone() + local.instr_type.is_xori.clone(),
+            local.instr_type.is_addi.clone()
+                + local.instr_type.is_xori.clone()
+                + local.instr_type.is_add.clone(),
             AB::Expr::ONE,
         );
 
@@ -103,7 +112,7 @@ where
             check_bit_decomposition(builder, limb.clone(), &local.decompositions[i]);
         }
 
-        // Opcode (bits 0..7) == 0b0010011 for both ADDI and XORI.
+        // Opcode (bits 0..7) == 0b0010011 for ADDI and XORI (I-type).
         let mut when_op_immediate =
             builder.when(local.instr_type.is_addi.clone() + local.instr_type.is_xori.clone());
         for i in 0..7 {
@@ -113,6 +122,17 @@ where
                 AB::Expr::ZERO
             };
             when_op_immediate.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+
+        // Opcode (bits 0..7) == 0b0110011 for ADD (R-type).
+        let mut when_add = builder.when(local.instr_type.is_add.clone());
+        for i in 0..7 {
+            let expected = if (0b0110011u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_add.assert_eq(local.decompositions[0][i].clone(), expected);
         }
 
         // funct3 = bits 12..15 of the instruction word — that's bits 4..7 of byte 1.
@@ -138,6 +158,18 @@ where
             when_xori.assert_eq(local.decompositions[1][4 + i].clone(), expected);
         }
 
+        // ADD: funct3 == 0b000
+        let mut when_add = builder.when(local.instr_type.is_add.clone());
+        for i in 0..3 {
+            when_add.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
+        }
+
+        // ADD: funct7 (bits 25..32) == 0b0000000 — bits 1..7 of byte 3.
+        let mut when_add = builder.when(local.instr_type.is_add.clone());
+        for i in 1..8 {
+            when_add.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
+        }
+
         // rd = bits 7..12 (1 bit in byte 0, 4 bits in byte 1).
         let rd_expr = pack_bits::<AB, 4>(
             &local.decompositions,
@@ -153,8 +185,7 @@ where
         builder.assert_eq(local.rs1.clone(), rs1_expr);
 
         // imm = bits 20..32 (4 bits in byte 2, 8 bits in byte 3) — unsigned 12-bit value.
-        // Sign extension is left to the consumer (CPU AIR), which can read the sign
-        // bit at decompositions[3][7].
+        // Constrained for all rows; for ADD rows the value is unused by the bus.
         let imm_expr = pack_bits::<AB, 4>(
             &local.decompositions,
             &[
@@ -174,9 +205,18 @@ where
         );
         builder.assert_eq(local.imm.clone(), imm_expr);
 
-        // check that the packed instruction type matches the unpacked one.
+        // rs2 = bits 20..25 (4 bits in byte 2, 1 bit in byte 3).
+        // Constrained for all rows; for I-type rows the value is unused by the bus.
+        let rs2_expr = pack_bits::<AB, 4>(
+            &local.decompositions,
+            &[(2, 4), (2, 5), (2, 6), (2, 7), (3, 0)],
+        );
+        builder.assert_eq(local.rs2.clone(), rs2_expr);
+
+        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD.
         let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
-            + local.instr_type.is_xori.clone() * AB::Expr::ONE;
+            + local.instr_type.is_xori.clone() * AB::Expr::ONE
+            + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(2));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -216,6 +256,14 @@ impl<F: Field> LookupAir<F> for DecodeAir {
             ));
         }
 
+        // For the decode bus field4: use imm for I-type instructions and rs2 for R-type.
+        // is_i_type = is_addi + is_xori (one-hot so sum is 0 or 1, safe to use as multiplier).
+        let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
+            + SymbolicExpression::from(local.instr_type.is_xori);
+        let field4: SymbolicExpression<F> = is_i_type * SymbolicExpression::from(local.imm)
+            + SymbolicExpression::from(local.instr_type.is_add)
+                * SymbolicExpression::from(local.rs2);
+
         // export the decoded instruction
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
@@ -224,7 +272,7 @@ impl<F: Field> LookupAir<F> for DecodeAir {
                     local.instr_type_packed.into(),
                     local.rd.into(),
                     local.rs1.into(),
-                    local.imm.into(),
+                    field4,
                 ],
                 local.mult.into(),
                 Direction::Receive,
