@@ -23,6 +23,7 @@ pub enum InstructionId {
     Addi = 0,
     Xori = 1,
     Add = 2,
+    Sub = 3,
 }
 
 #[repr(C)]
