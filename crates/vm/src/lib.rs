@@ -57,11 +57,6 @@ impl VM {
     }
 
     pub fn run(&mut self) -> Result<(), String> {
-        let initial_state = VMState {
-            pc: self.pc,
-            registers: [0; 32],
-        };
-        self.trace.push((initial_state, Vec::new()));
         while (self.pc as usize) < self.program.len() {
             self.step()?;
         }
@@ -69,6 +64,15 @@ impl VM {
     }
 
     pub fn step(&mut self) -> Result<(), String> {
+        // Snapshot current register state for this step's trace entry.
+        let current_registers = self
+            .trace
+            .last()
+            .map(|(s, _)| s.registers)
+            .unwrap_or([0u32; 32]);
+        self.trace
+            .push((VMState { pc: self.pc, registers: current_registers }, Vec::new()));
+
         let pc = self.pc as usize;
         let word = u32::from_le_bytes([
             self.program[pc],
@@ -136,6 +140,11 @@ impl VM {
         self.trace.iter().flat_map(|(_, ops)| ops.iter()).collect()
     }
 
+    /// Return the VMState snapshot at the start of each executed step.
+    pub fn get_trace(&self) -> Vec<VMState> {
+        self.trace.iter().map(|(state, _)| state.clone()).collect()
+    }
+
     fn decode_instruction(bytes: u32) -> Instruction {
         if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b000 {
             let rd = ((bytes >> 7) & 0b11111) as u8;
@@ -152,9 +161,6 @@ impl VM {
         }
     }
 
-    pub fn get_trace(&self) -> Vec<VMState> {
-        todo!()
-    }
 }
 
 #[cfg(test)]
@@ -360,18 +366,10 @@ mod tests {
         let program = fs::read(&path).expect("failed to read test.bin");
 
         let mut vm = VM::new(program);
-        // Seed the trace with the initial state so step() can read/update it.
-        vm.trace.push((
-            VMState {
-                pc: vm.pc,
-                registers: [0; 32],
-            },
-            Vec::new(),
-        ));
 
         println!("== initial state ==");
         println!("  pc=0x{:08x}", vm.pc);
-        print_regs(&vm.trace.last().unwrap().0.registers);
+        print_regs(&[0u32; 32]);
 
         let mut step_idx = 0;
         while (vm.pc as usize) < vm.program.len() {

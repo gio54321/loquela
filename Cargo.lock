@@ -473,6 +473,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "punctum-prover"
+version = "0.1.0"
+dependencies = [
+ "p3-air",
+ "p3-batch-stark",
+ "p3-challenger",
+ "p3-circle",
+ "p3-commit",
+ "p3-field",
+ "p3-fri",
+ "p3-keccak",
+ "p3-lookup",
+ "p3-matrix",
+ "p3-merkle-tree",
+ "p3-mersenne-31",
+ "p3-symmetric",
+ "p3-uni-stark",
+ "punctum-air",
+ "punctum-vm",
+]
+
+[[package]]
 name = "punctum-vm"
 version = "0.1.0"
 dependencies = [
