@@ -1,3 +1,4 @@
+pub mod and_lookup;
 pub mod bit_decompose;
 pub mod byte_less_than_lookup;
 pub mod byte_lookup;
