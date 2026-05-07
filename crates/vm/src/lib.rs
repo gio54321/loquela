@@ -11,6 +11,7 @@ pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
     OriI { rd: u8, rs1: u8, imm: i16 },
+    AndiI { rd: u8, rs1: u8, imm: i16 },
     Add { rd: u8, rs1: u8, rs2: u8 },
     Sub { rd: u8, rs1: u8, rs2: u8 },
     Xor { rd: u8, rs1: u8, rs2: u8 },
@@ -169,6 +170,29 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::AndiI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val & (*imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
             Instruction::Add { rd, rs1, rs2 } => {
                 let rs1_val = registers[*rs1 as usize];
                 let rs2_val = registers[*rs2 as usize];
@@ -303,6 +327,11 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::OriI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b111 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::AndiI { rd, rs1, imm }
         } else if bytes & 0b1111111 == 0b0110011
             && (bytes >> 12) & 0b111 == 0b000
             && (bytes >> 25) == 0b0000000
@@ -381,6 +410,15 @@ mod tests {
         let word = ((imm as u32 & 0xFFF) << 20)
             | ((rs1 as u32) << 15)
             | (0b110 << 12)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_andi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b111 << 12)
             | ((rd as u32) << 7)
             | 0b001_0011;
         word.to_le_bytes()
@@ -751,6 +789,63 @@ mod tests {
 
         let regs = vm.trace.last().unwrap().state.registers;
         assert_eq!(regs[2], u32::MAX);
+    }
+
+    // andi x2, x1, imm → read x1, write x2 with x1 & sign_extend(imm).
+    #[test]
+    fn andi_logs_read_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+        program.extend_from_slice(&encode_andi(2, 1, 0x0F)); // x2 = 0xFF & 0x0F = 0x0F
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 0xFF,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 0x0F,
+                ..
+            }
+        ));
+    }
+
+    // andi with negative immediate sign-extends to 32 bits.
+    #[test]
+    fn andi_sign_extended_immediate() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+        program.extend_from_slice(&encode_andi(2, 1, -1i16)); // x2 = 0xFFFF_FFFF & 0xFFFF_FFFF = 0xFFFF_FFFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], u32::MAX);
+    }
+
+    // andi with 0xFF mask extracts low byte.
+    #[test]
+    fn andi_mask_low_byte() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+        program.extend_from_slice(&encode_andi(2, 1, 0xFF)); // x2 = 0xFFFF_FFFF & 0xFF = 0xFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], 0xFF);
     }
 
     // xor of a register with itself should produce zero.
