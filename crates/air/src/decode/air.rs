@@ -59,6 +59,7 @@ impl<T> BorrowMut<DecodeColumns<T>> for [T] {
     }
 }
 
+#[derive(Clone)]
 pub struct DecodeAir {
     num_lookups: usize,
 }
