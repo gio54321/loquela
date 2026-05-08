@@ -14,12 +14,58 @@ fn encode_add(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_sub(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    // funct7=0b0100000 occupies bits 25..32; bit 30 (funct7 bit 5) is set.
+    let word = (0b010_0000u32 << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     let word = ((imm as u32 & 0xFFF) << 20)
         | ((rs1 as u32) << 15)
         | (0b100 << 12)
         | ((rd as u32) << 7)
         | 0b001_0011;
+    word.to_le_bytes()
+}
+
+fn encode_ori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b110 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+fn encode_andi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b111 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b100 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
+fn encode_or(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b110 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
     word.to_le_bytes()
 }
 
@@ -289,6 +335,142 @@ fn negative_memory_write_value() {
     );
 }
 
+/// Single SUB: x3 = x1 - x2. Exercises the register-register subtraction path.
+#[test]
+fn prove_single_sub() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 7
+    prove(&program);
+}
+
+/// SUB wrapping underflow: 0 - 1 = 0xFFFF_FFFF.
+#[test]
+fn prove_sub_wrapping() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 0xFFFF_FFFF (wraps)
+    prove(&program);
+}
+
+/// Mixed ADD + SUB: exercises both R-type instructions together.
+#[test]
+fn prove_mixed_add_sub() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 27
+    program.extend_from_slice(&encode_sub(4, 3, 2)); // x4 = 20
+    prove(&program);
+}
+
+/// Single XOR: x3 = x1 ^ x2. Exercises the register-register XOR path.
+#[test]
+fn prove_single_xor() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+    program.extend_from_slice(&encode_addi(2, 0, 0b1100)); // x2 = 0b1100
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0b0110
+    prove(&program);
+}
+
+/// XOR of a register with itself produces zero: x ^ x == 0.
+#[test]
+fn prove_xor_self_is_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x7FF)); // x1 = 0x7FF
+    program.extend_from_slice(&encode_xor(2, 1, 1)); // x2 = x1 ^ x1 = 0
+    prove(&program);
+}
+
+/// XOR with all-ones (from XORI -1) produces bitwise complement.
+#[test]
+fn prove_xor_complement() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = ~42 = 0xFFFF_FFD5
+    prove(&program);
+}
+
+/// Mixed XOR and ADD: exercises both R-type instruction paths together.
+#[test]
+fn prove_mixed_xor_add() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+    program.extend_from_slice(&encode_addi(2, 0, 0x0F)); // x2 = 0x0F
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0xF0
+    program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 0xF0 + 0xFF = 0x1EF
+    prove(&program);
+}
+
+/// Single ORI: x2 = x1 | 0xFF. Exercises the bytes_or bus.
+#[test]
+fn prove_single_ori() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_ori(2, 1, 0xFF)); // x2 = 5 | 0xFF = 0xFF
+    prove(&program);
+}
+
+/// ORI with a negative (sign-extended) immediate: x2 = x1 | 0xFFFF_FFFF.
+#[test]
+fn prove_ori_negative_immediate() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_ori(2, 1, -1i16)); // x2 = 42 | 0xFFFF_FFFF = 0xFFFF_FFFF
+    prove(&program);
+}
+
+/// Mixed ADDI + ORI program.
+#[test]
+fn prove_mixed_addi_ori() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+    program.extend_from_slice(&encode_ori(2, 1, 0b0101)); // x2 = 0b1010 | 0b0101 = 0b1111
+    program.extend_from_slice(&encode_ori(3, 2, 0x00)); // x3 = 0b1111 | 0 = 0b1111
+    prove(&program);
+}
+
+/// Single ANDI: x2 = x1 & 0x0F. Exercises the bytes_and bus.
+#[test]
+fn prove_single_andi() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+    program.extend_from_slice(&encode_andi(2, 1, 0x0F)); // x2 = 0xFF & 0x0F = 0x0F
+    prove(&program);
+}
+
+/// ANDI masking pattern: AND with 0xFF extracts the low byte.
+#[test]
+fn prove_andi_byte_mask() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_andi(2, 1, 0xFF)); // x2 = 0xFFFF_FFFF & 0xFF = 0xFF
+    prove(&program);
+}
+
+/// ANDI with a negative (sign-extended) immediate: x2 = x1 & 0xFFFF_FFFF.
+#[test]
+fn prove_andi_negative_immediate() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_andi(2, 1, -1i16)); // x2 = 42 & 0xFFFF_FFFF = 42
+    prove(&program);
+}
+
+/// Mixed ADDI + ANDI program.
+#[test]
+fn prove_mixed_addi_andi() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1111)); // x1 = 0b1111
+    program.extend_from_slice(&encode_andi(2, 1, 0b1010)); // x2 = 0b1111 & 0b1010 = 0b1010
+    program.extend_from_slice(&encode_andi(3, 2, 0b0100)); // x3 = 0b1010 & 0b0100 = 0b0000
+    prove(&program);
+}
+
 /// Set `is_address_equal` to a non-boolean value (2) in a memory row.
 ///
 /// The memory AIR asserts this column is boolean.  A value of 2 violates
@@ -321,4 +503,37 @@ fn negative_nonboolean_is_address_equal() {
         !prove_and_verify(traces),
         "non-boolean is_address_equal should fail verification"
     );
+}
+
+// ── OR instruction tests ──────────────────────────────────────────────────────
+
+/// Single OR: x3 = x1 | x2. Exercises the bytes_or bus.
+#[test]
+fn prove_single_or() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 10 | 7 = 15
+    prove(&program);
+}
+
+/// OR with 0xFFFFFFFF produces all-ones regardless of the other operand.
+#[test]
+fn prove_or_all_ones() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 5 | 0xFFFF_FFFF = 0xFFFF_FFFF
+    prove(&program);
+}
+
+/// Mixed ADDI + OR program exercising both I-type and OR R-type paths.
+#[test]
+fn prove_mixed_addi_or() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x0F)); // x1 = 0x0F
+    program.extend_from_slice(&encode_addi(2, 0, 0x70)); // x2 = 0x70
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 0x0F | 0x70 = 0x7F
+    program.extend_from_slice(&encode_or(4, 3, 1)); // x4 = 0x7F | 0x0F = 0x7F
+    prove(&program);
 }

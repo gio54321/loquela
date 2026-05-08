@@ -10,7 +10,12 @@ pub enum MemoryType {
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
+    OriI { rd: u8, rs1: u8, imm: i16 },
+    AndiI { rd: u8, rs1: u8, imm: i16 },
     Add { rd: u8, rs1: u8, rs2: u8 },
+    Sub { rd: u8, rs1: u8, rs2: u8 },
+    Xor { rd: u8, rs1: u8, rs2: u8 },
+    Or { rd: u8, rs1: u8, rs2: u8 },
     And { rd: u8, rs1: u8, rs2: u8 },
     Sll { rd: u8, rs1: u8, rs2: u8 },
 }
@@ -145,11 +150,150 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::OriI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val | (*imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::AndiI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val & (*imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
             Instruction::Add { rd, rs1, rs2 } => {
                 let rs1_val = registers[*rs1 as usize];
                 let rs2_val = registers[*rs2 as usize];
                 let old_rd = registers[*rd as usize];
                 let result = rs1_val.wrapping_add(rs2_val);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::Sub { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val.wrapping_sub(rs2_val);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::Xor { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val ^ rs2_val;
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::Or { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = rs1_val | rs2_val;
 
                 ops.push(MemoryOperation::Read {
                     memory_type: MemoryType::Register,
@@ -275,6 +419,16 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::XorI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b110 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::OriI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b111 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes as i32) >> 20) as i16;
+            Instruction::AndiI { rd, rs1, imm }
         } else if bytes & 0b1111111 == 0b0110011
             && (bytes >> 12) & 0b111 == 0b000
             && (bytes >> 25) == 0b0000000
@@ -283,6 +437,30 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let rs2 = ((bytes >> 20) & 0b11111) as u8;
             Instruction::Add { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b000
+            && (bytes >> 25) == 0b0100000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Sub { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b100
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Xor { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b110
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Or { rd, rs1, rs2 }
         } else if bytes & 0b1111111 == 0b0110011
             && (bytes >> 12) & 0b111 == 0b111
             && (bytes >> 25) == 0b0000000
@@ -322,10 +500,46 @@ mod tests {
         word.to_le_bytes()
     }
 
+    fn encode_sub(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+        let word = (0b010_0000u32 << 25)
+            | ((rs2 as u32) << 20)
+            | ((rs1 as u32) << 15)
+            | ((rd as u32) << 7)
+            | 0b011_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+        let word = ((rs2 as u32) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b100 << 12)
+            | ((rd as u32) << 7)
+            | 0b011_0011;
+        word.to_le_bytes()
+    }
+
     fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
         let word = ((imm as u32 & 0xFFF) << 20)
             | ((rs1 as u32) << 15)
             | (0b100 << 12)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_ori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b110 << 12)
+            | ((rd as u32) << 7)
+            | 0b001_0011;
+        word.to_le_bytes()
+    }
+
+    fn encode_andi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b111 << 12)
             | ((rd as u32) << 7)
             | 0b001_0011;
         word.to_le_bytes()
@@ -540,6 +754,63 @@ mod tests {
         ));
     }
 
+    // sub x3, x1, x2 → read x1 (ts=0), read x2 (ts=1), write x3 (ts=2)
+    #[test]
+    fn sub_logs_two_reads_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+        program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+        program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = x1 - x2 = 7
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        // 2 ops for addi x1, 2 ops for addi x2, 3 ops for sub x3
+        assert_eq!(ops.len(), 7);
+
+        assert!(matches!(
+            ops[4],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 4,
+                value: 10,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[5],
+            MemoryOperation::Read {
+                address: 2,
+                timestamp: 5,
+                value: 3,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[6],
+            MemoryOperation::Write {
+                address: 3,
+                timestamp: 6,
+                old_value: 0,
+                new_value: 7,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn sub_wrapping_underflow() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
+        program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+        program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 0 - 1 = 0xFFFF_FFFF (wraps)
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[3], u32::MAX);
+    }
+
     #[test]
     fn add_wrapping_overflow() {
         let mut program = Vec::new();
@@ -551,6 +822,164 @@ mod tests {
 
         let regs = vm.trace.last().unwrap().state.registers;
         assert_eq!(regs[3], 0);
+    }
+
+    // xor x3, x1, x2 → read x1 (ts=0), read x2 (ts=1), write x3 (ts=2)
+    #[test]
+    fn xor_logs_two_reads_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+        program.extend_from_slice(&encode_addi(2, 0, 0b1100)); // x2 = 0b1100
+        program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0b0110
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        // 2 ops for addi x1, 2 ops for addi x2, 3 ops for xor x3
+        assert_eq!(ops.len(), 7);
+
+        assert!(matches!(
+            ops[4],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 4,
+                value: 0b1010,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[5],
+            MemoryOperation::Read {
+                address: 2,
+                timestamp: 5,
+                value: 0b1100,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[6],
+            MemoryOperation::Write {
+                address: 3,
+                timestamp: 6,
+                old_value: 0,
+                new_value: 0b0110,
+                ..
+            }
+        ));
+    }
+
+    // ori x2, x1, imm → read x1, write x2 with x1 | sign_extend(imm).
+    #[test]
+    fn ori_logs_read_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+        program.extend_from_slice(&encode_ori(2, 1, 0xFF)); // x2 = 5 | 0xFF = 0xFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 5,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 0xFF,
+                ..
+            }
+        ));
+    }
+
+    // ori with negative immediate sign-extends to 32 bits.
+    #[test]
+    fn ori_sign_extended_immediate() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
+        program.extend_from_slice(&encode_ori(2, 1, -1i16)); // x2 = 0 | 0xFFFF_FFFF = 0xFFFF_FFFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], u32::MAX);
+    }
+
+    // andi x2, x1, imm → read x1, write x2 with x1 & sign_extend(imm).
+    #[test]
+    fn andi_logs_read_then_write() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+        program.extend_from_slice(&encode_andi(2, 1, 0x0F)); // x2 = 0xFF & 0x0F = 0x0F
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let ops = vm.get_memory_ops();
+        assert!(matches!(
+            ops[2],
+            MemoryOperation::Read {
+                address: 1,
+                timestamp: 2,
+                value: 0xFF,
+                ..
+            }
+        ));
+        assert!(matches!(
+            ops[3],
+            MemoryOperation::Write {
+                address: 2,
+                timestamp: 3,
+                old_value: 0,
+                new_value: 0x0F,
+                ..
+            }
+        ));
+    }
+
+    // andi with negative immediate sign-extends to 32 bits.
+    #[test]
+    fn andi_sign_extended_immediate() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+        program.extend_from_slice(&encode_andi(2, 1, -1i16)); // x2 = 0xFFFF_FFFF & 0xFFFF_FFFF = 0xFFFF_FFFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], u32::MAX);
+    }
+
+    // andi with 0xFF mask extracts low byte.
+    #[test]
+    fn andi_mask_low_byte() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+        program.extend_from_slice(&encode_andi(2, 1, 0xFF)); // x2 = 0xFFFF_FFFF & 0xFF = 0xFF
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], 0xFF);
+    }
+
+    // xor of a register with itself should produce zero.
+    #[test]
+    fn xor_self_produces_zero() {
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 0x7FF)); // x1 = 0x7FF
+        program.extend_from_slice(&encode_xor(2, 1, 1)); // x2 = x1 ^ x1 = 0
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[2], 0);
     }
 
     fn print_regs(regs: &[u32; 32]) {

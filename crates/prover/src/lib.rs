@@ -20,13 +20,19 @@ use loquela_air::decode::air::DecodeAir;
 use loquela_air::instructions::add::air::AddAir;
 use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
+use loquela_air::instructions::andi::air::AndiAir;
+use loquela_air::instructions::or::air::OrInstrAir;
+use loquela_air::instructions::ori::air::OriAir;
 use loquela_air::instructions::sll::air::SllAir;
+use loquela_air::instructions::sub::air::SubAir;
+use loquela_air::instructions::xor::air::XorInstrAir;
 use loquela_air::instructions::xori::air::XoriAir;
 use loquela_air::memory::air::MemoryAir;
 use loquela_air::primitives::and_lookup::AndAir;
 use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
 use loquela_air::primitives::byte_lookup::BytesAir;
 use loquela_air::primitives::byte_shift_left_lookup::ByteShiftLeftAir;
+use loquela_air::primitives::or_lookup::OrAir;
 use loquela_air::primitives::timestamp_less_than::TimestampLessThanAir;
 use loquela_air::primitives::u32_less_than_lookup::U32LessThanAir;
 use loquela_air::primitives::xor_lookup::XorAir;
@@ -75,15 +81,23 @@ pub enum LoquelAir {
     Decode(DecodeAir),
     Add(AddAir),
     Addi(AddiAir),
+    Andi(AndiAir),
+    Ori(OriAir),
+    Sub(SubAir),
+    XorInstr(XorInstrAir),
     Xori(XoriAir),
     AndInstr(AndInstrAir),
     Sll(SllAir),
+    OrInstr(OrInstrAir),
     Memory(MemoryAir),
     Program(ProgramAir),
     Bytes(BytesAir),
-    Xor(XorAir),
     And(AndAir),
     ByteSll(ByteShiftLeftAir),
+    Or(OrAir),
+    Xor(XorAir),
+    AndPrim(AndAir),
+    OrPrim(OrAir),
     U32Lt(U32LessThanAir),
     TimestampLt(TimestampLessThanAir),
     BytesLt(LessThanAir),
@@ -96,15 +110,23 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Decode(a) => BaseAir::<F>::width(a),
             LoquelAir::Add(a) => BaseAir::<F>::width(a),
             LoquelAir::Addi(a) => BaseAir::<F>::width(a),
+            LoquelAir::Andi(a) => BaseAir::<F>::width(a),
+            LoquelAir::Ori(a) => BaseAir::<F>::width(a),
+            LoquelAir::Sub(a) => BaseAir::<F>::width(a),
+            LoquelAir::XorInstr(a) => BaseAir::<F>::width(a),
             LoquelAir::Xori(a) => BaseAir::<F>::width(a),
             LoquelAir::AndInstr(a) => BaseAir::<F>::width(a),
             LoquelAir::Sll(a) => BaseAir::<F>::width(a),
+            LoquelAir::OrInstr(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
             LoquelAir::Bytes(a) => BaseAir::<F>::width(a),
-            LoquelAir::Xor(a) => BaseAir::<F>::width(a),
             LoquelAir::And(a) => BaseAir::<F>::width(a),
             LoquelAir::ByteSll(a) => BaseAir::<F>::width(a),
+            LoquelAir::Or(a) => BaseAir::<F>::width(a),
+            LoquelAir::Xor(a) => BaseAir::<F>::width(a),
+            LoquelAir::AndPrim(a) => BaseAir::<F>::width(a),
+            LoquelAir::OrPrim(a) => BaseAir::<F>::width(a),
             LoquelAir::U32Lt(a) => BaseAir::<F>::width(a),
             LoquelAir::TimestampLt(a) => BaseAir::<F>::width(a),
             LoquelAir::BytesLt(a) => BaseAir::<F>::width(a),
@@ -115,9 +137,12 @@ impl<F: Field> BaseAir<F> for LoquelAir {
         match self {
             LoquelAir::Boundaries(a) => a.preprocessed_trace(),
             LoquelAir::Bytes(a) => a.preprocessed_trace(),
-            LoquelAir::Xor(a) => a.preprocessed_trace(),
             LoquelAir::And(a) => a.preprocessed_trace(),
             LoquelAir::ByteSll(a) => a.preprocessed_trace(),
+            LoquelAir::Or(a) => a.preprocessed_trace(),
+            LoquelAir::Xor(a) => a.preprocessed_trace(),
+            LoquelAir::AndPrim(a) => a.preprocessed_trace(),
+            LoquelAir::OrPrim(a) => a.preprocessed_trace(),
             LoquelAir::BytesLt(a) => a.preprocessed_trace(),
             _ => None,
         }
@@ -136,15 +161,23 @@ where
             LoquelAir::Decode(a) => a.eval(builder),
             LoquelAir::Add(a) => a.eval(builder),
             LoquelAir::Addi(a) => a.eval(builder),
+            LoquelAir::Andi(a) => a.eval(builder),
+            LoquelAir::Ori(a) => a.eval(builder),
+            LoquelAir::Sub(a) => a.eval(builder),
+            LoquelAir::XorInstr(a) => a.eval(builder),
             LoquelAir::Xori(a) => a.eval(builder),
             LoquelAir::AndInstr(a) => a.eval(builder),
             LoquelAir::Sll(a) => a.eval(builder),
+            LoquelAir::OrInstr(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
             LoquelAir::Bytes(a) => a.eval(builder),
-            LoquelAir::Xor(a) => a.eval(builder),
             LoquelAir::And(a) => a.eval(builder),
             LoquelAir::ByteSll(a) => a.eval(builder),
+            LoquelAir::Or(a) => a.eval(builder),
+            LoquelAir::Xor(a) => a.eval(builder),
+            LoquelAir::AndPrim(a) => a.eval(builder),
+            LoquelAir::OrPrim(a) => a.eval(builder),
             LoquelAir::U32Lt(a) => a.eval(builder),
             LoquelAir::TimestampLt(a) => a.eval(builder),
             LoquelAir::BytesLt(a) => a.eval(builder),
@@ -159,15 +192,23 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Add(a) => <AddAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Andi(a) => <AndiAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Ori(a) => <OriAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Sub(a) => <SubAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::XorInstr(a) => <XorInstrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::AndInstr(a) => <AndInstrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::add_lookup_columns(a),
-            LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Or(a) => <OrAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::AndPrim(a) => <AndAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::OrPrim(a) => <OrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::U32Lt(a) => <U32LessThanAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::TimestampLt(a) => {
                 <TimestampLessThanAir as LookupAir<F>>::add_lookup_columns(a)
@@ -182,15 +223,23 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Add(a) => <AddAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Andi(a) => <AndiAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Ori(a) => <OriAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Sub(a) => <SubAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::XorInstr(a) => <XorInstrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::AndInstr(a) => <AndInstrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::get_lookups(a),
-            LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Or(a) => <OrAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::AndPrim(a) => <AndAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::OrPrim(a) => <OrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::U32Lt(a) => <U32LessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::TimestampLt(a) => <TimestampLessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::BytesLt(a) => <LessThanAir as LookupAir<F>>::get_lookups(a),
@@ -208,6 +257,8 @@ pub struct AllTraces {
     pub memory: RowMajorMatrix<Val>,
     pub program: RowMajorMatrix<Val>,
     pub bytes: RowMajorMatrix<Val>,
+    pub and: RowMajorMatrix<Val>,
+    pub or: RowMajorMatrix<Val>,
     pub xor: RowMajorMatrix<Val>,
     pub u32_lt: RowMajorMatrix<Val>,
     pub timestamp_lt: RowMajorMatrix<Val>,
@@ -216,8 +267,20 @@ pub struct AllTraces {
     pub add: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains ADDI instructions.
     pub addi: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains ANDI instructions.
+    pub andi: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains ORI instructions.
+    pub ori: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SUB instructions.
+    pub sub: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains XORI instructions.
     pub xori: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains XOR instructions.
+    pub xor_instr: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains OR instructions.
+    pub or_instr: Option<RowMajorMatrix<Val>>,
+    /// OR primitive lookup table (always present).
+    pub or_prim: RowMajorMatrix<Val>,
     /// Present when the program contains AND instructions (instruction AIR).
     pub and_instr: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains AND instructions (bytes_and lookup table).
@@ -238,13 +301,21 @@ impl AllTraces {
             memory,
             program,
             bytes,
+            and,
+            or,
             xor,
             u32_lt,
             timestamp_lt,
             bytes_lt,
             add,
             addi,
+            andi,
+            ori,
+            sub,
             xori,
+            xor_instr,
+            or_instr,
+            or_prim,
             and_instr,
             and_prim,
             sll,
@@ -256,10 +327,13 @@ impl AllTraces {
             memory,
             program,
             bytes,
+            and,
+            or,
             xor,
             u32_lt,
             timestamp_lt,
             bytes_lt,
+            or_prim,
         ];
         if let Some(t) = add {
             traces.push(t);
@@ -267,7 +341,22 @@ impl AllTraces {
         if let Some(t) = addi {
             traces.push(t);
         }
+        if let Some(t) = andi {
+            traces.push(t);
+        }
+        if let Some(t) = ori {
+            traces.push(t);
+        }
+        if let Some(t) = sub {
+            traces.push(t);
+        }
         if let Some(t) = xori {
+            traces.push(t);
+        }
+        if let Some(t) = xor_instr {
+            traces.push(t);
+        }
+        if let Some(t) = or_instr {
             traces.push(t);
         }
         if let Some(t) = and_instr {
@@ -300,7 +389,7 @@ fn bytes_multiplicities(vals: &[u32]) -> [Val; 256] {
     mults
 }
 
-/// Count XOR triples from XORI steps: row index = x * 256 + y.
+/// Count XOR triples from XORI/XOR steps: row index = x * 256 + y.
 fn xor_multiplicities(xori_ops: &[(u32, u32, u32)]) -> Vec<Val> {
     let mut mults = vec![Val::ZERO; 256 * 256];
     for &(x, y, _) in xori_ops {
@@ -309,10 +398,19 @@ fn xor_multiplicities(xori_ops: &[(u32, u32, u32)]) -> Vec<Val> {
     mults
 }
 
-/// Count AND triples from AND steps: row index = x * 256 + y.
-fn and_multiplicities(and_ops: &[(u32, u32, u32)]) -> Vec<Val> {
+/// Count OR triples (used for both ORI and OR steps): row index = x * 256 + y.
+fn or_multiplicities(ops: &[(u32, u32, u32)]) -> Vec<Val> {
     let mut mults = vec![Val::ZERO; 256 * 256];
-    for &(x, y, _) in and_ops {
+    for &(x, y, _) in ops {
+        mults[x as usize * 256 + y as usize] += Val::ONE;
+    }
+    mults
+}
+
+/// Count AND triples (used for both ANDI and AND steps): row index = x * 256 + y.
+fn and_multiplicities(ops: &[(u32, u32, u32)]) -> Vec<Val> {
+    let mut mults = vec![Val::ZERO; 256 * 256];
+    for &(x, y, _) in ops {
         mults[x as usize * 256 + y as usize] += Val::ONE;
     }
     mults
@@ -424,9 +522,24 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_addi = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::AddI { .. }));
+    let has_andi = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::AndiI { .. }));
+    let has_ori = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::OriI { .. }));
+    let has_sub = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Sub { .. }));
     let has_xori = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::XorI { .. }));
+    let has_xor = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Xor { .. }));
+    let has_or = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Or { .. }));
     let has_and = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::And { .. }));
@@ -459,8 +572,43 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     } else {
         None
     };
+    let sub_trace = if has_sub {
+        Some(loquela_air::instructions::sub::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let andi_trace = if has_andi {
+        Some(loquela_air::instructions::andi::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let ori_trace = if has_ori {
+        Some(loquela_air::instructions::ori::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
     let xori_trace = if has_xori {
         Some(loquela_air::instructions::xori::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let xor_instr_trace = if has_xor {
+        Some(loquela_air::instructions::xor::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let or_instr_trace = if has_or {
+        Some(loquela_air::instructions::or::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -493,7 +641,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
     // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new),
-    // ADD (rs1, rs2, rd_new), and SLL (rs2_value, rd_new; plus rs2_shamt_high scalar).
+    // ADD (rs1, rs2, rd_new), SUB (rs1, rs2, rd_new), and SLL (rs2_value, rd_new; plus rs2_shamt_high scalar).
     let mut byte_checked_vals: Vec<u32> = Vec::new();
     for s in steps.iter() {
         match s.memory_ops.as_slice() {
@@ -504,7 +652,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rd);
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
-                if matches!(s.instruction, Instruction::Add { .. }) =>
+                if matches!(
+                    s.instruction,
+                    Instruction::Add { .. } | Instruction::Sub { .. }
+                ) =>
             {
                 byte_checked_vals.push(*rs1);
                 byte_checked_vals.push(*rs2);
@@ -522,6 +673,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
                 byte_checked_vals.push(rs2_shamt_high);
             }
+            // XOR: range-check rs1 and rs2 bytes via "bytes" bus (rd is checked by bytes_xor).
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { .. }]
+                if matches!(s.instruction, Instruction::Xor { .. }) =>
+            {
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+            }
             _ => {}
         }
     }
@@ -529,25 +687,89 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let bytes = loquela_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
+    let mut ori_triples: Vec<(u32, u32, u32)> = Vec::new();
+    let mut andi_triples: Vec<(u32, u32, u32)> = Vec::new();
     for s in steps.iter() {
-        let imm = match s.instruction {
-            Instruction::XorI { imm, .. } => imm,
-            _ => continue,
-        };
-        let imm_se = imm as i32 as u32;
-        if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] =
-            s.memory_ops.as_slice()
-        {
-            let rs1_b = rs1.to_le_bytes();
-            let imm_b = imm_se.to_le_bytes();
-            let rd_b = rd.to_le_bytes();
-            for i in 0..4 {
-                xori_triples.push((rs1_b[i] as u32, imm_b[i] as u32, rd_b[i] as u32));
+        match s.instruction {
+            Instruction::XorI { imm, .. } => {
+                let imm_se = imm as i32 as u32;
+                if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] =
+                    s.memory_ops.as_slice()
+                {
+                    let rs1_b = rs1.to_le_bytes();
+                    let imm_b = imm_se.to_le_bytes();
+                    let rd_b = rd.to_le_bytes();
+                    for i in 0..4 {
+                        xori_triples.push((rs1_b[i] as u32, imm_b[i] as u32, rd_b[i] as u32));
+                    }
+                }
             }
+            Instruction::Xor { .. } => {
+                if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }] =
+                    s.memory_ops.as_slice()
+                {
+                    let rs1_b = rs1.to_le_bytes();
+                    let rs2_b = rs2.to_le_bytes();
+                    let rd_b = rd.to_le_bytes();
+                    for i in 0..4 {
+                        xori_triples.push((rs1_b[i] as u32, rs2_b[i] as u32, rd_b[i] as u32));
+                    }
+                }
+            }
+            Instruction::OriI { imm, .. } => {
+                let imm_se = imm as i32 as u32;
+                if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] =
+                    s.memory_ops.as_slice()
+                {
+                    let rs1_b = rs1.to_le_bytes();
+                    let imm_b = imm_se.to_le_bytes();
+                    let rd_b = rd.to_le_bytes();
+                    for i in 0..4 {
+                        ori_triples.push((rs1_b[i] as u32, imm_b[i] as u32, rd_b[i] as u32));
+                    }
+                }
+            }
+            Instruction::AndiI { imm, .. } => {
+                let imm_se = imm as i32 as u32;
+                if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }] =
+                    s.memory_ops.as_slice()
+                {
+                    let rs1_b = rs1.to_le_bytes();
+                    let imm_b = imm_se.to_le_bytes();
+                    let rd_b = rd.to_le_bytes();
+                    for i in 0..4 {
+                        andi_triples.push((rs1_b[i] as u32, imm_b[i] as u32, rd_b[i] as u32));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     let xor_mults = xor_multiplicities(&xori_triples);
     let xor = loquela_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
+    let or_mults = or_multiplicities(&ori_triples);
+    let or = loquela_air::primitives::or_lookup::build_trace::<Val>(&or_mults);
+    let and_mults = and_multiplicities(&andi_triples);
+    let and = loquela_air::primitives::and_lookup::build_trace::<Val>(&and_mults);
+
+    let mut or_triples: Vec<(u32, u32, u32)> = Vec::new();
+    for s in steps.iter() {
+        if !matches!(s.instruction, Instruction::Or { .. }) {
+            continue;
+        }
+        if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }] =
+            s.memory_ops.as_slice()
+        {
+            let rs1_b = rs1.to_le_bytes();
+            let rs2_b = rs2.to_le_bytes();
+            let rd_b = rd.to_le_bytes();
+            for i in 0..4 {
+                or_triples.push((rs1_b[i] as u32, rs2_b[i] as u32, rd_b[i] as u32));
+            }
+        }
+    }
+    let or_mults = or_multiplicities(&or_triples);
+    let or_prim = loquela_air::primitives::or_lookup::build_trace::<Val>(&or_mults);
 
     let mut and_triples: Vec<(u32, u32, u32)> = Vec::new();
     for s in steps.iter() {
@@ -614,10 +836,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         LoquelAir::Memory(MemoryAir::new()),
         LoquelAir::Program(ProgramAir::new()),
         LoquelAir::Bytes(BytesAir::new()),
+        LoquelAir::And(AndAir::new()),
+        LoquelAir::Or(OrAir::new()),
         LoquelAir::Xor(XorAir::new()),
         LoquelAir::U32Lt(U32LessThanAir::new()),
         LoquelAir::TimestampLt(TimestampLessThanAir::new()),
         LoquelAir::BytesLt(LessThanAir::new()),
+        LoquelAir::OrPrim(OrAir::new()),
     ];
 
     if has_add {
@@ -626,12 +851,27 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_addi {
         airs.push(LoquelAir::Addi(AddiAir::new()));
     }
+    if has_andi {
+        airs.push(LoquelAir::Andi(AndiAir::new()));
+    }
+    if has_ori {
+        airs.push(LoquelAir::Ori(OriAir::new()));
+    }
+    if has_sub {
+        airs.push(LoquelAir::Sub(SubAir::new()));
+    }
     if has_xori {
         airs.push(LoquelAir::Xori(XoriAir::new()));
     }
+    if has_xor {
+        airs.push(LoquelAir::XorInstr(XorInstrAir::new()));
+    }
+    if has_or {
+        airs.push(LoquelAir::OrInstr(OrInstrAir::new()));
+    }
     if has_and {
         airs.push(LoquelAir::AndInstr(AndInstrAir::new()));
-        airs.push(LoquelAir::And(AndAir::new()));
+        airs.push(LoquelAir::AndPrim(AndAir::new()));
     }
     if has_sll {
         airs.push(LoquelAir::Sll(SllAir::new()));
@@ -645,13 +885,21 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         memory,
         program: program_trace,
         bytes,
+        and,
+        or,
         xor,
         u32_lt,
         timestamp_lt,
         bytes_lt,
         add: add_trace,
         addi: addi_trace,
+        andi: andi_trace,
+        ori: ori_trace,
+        sub: sub_trace,
         xori: xori_trace,
+        xor_instr: xor_instr_trace,
+        or_instr: or_instr_trace,
+        or_prim,
         and_instr: and_instr_trace,
         and_prim: and_prim_trace,
         sll: sll_trace,

@@ -56,6 +56,34 @@ pub fn u32_plus_four<AB: AirBuilder>(
     }
 }
 
+/// Assumes that `x`, `y` and `diff` are normalized byte limbs.
+/// Asserts that `diff = x - y` as a wrapping u32, with borrow-chain bits.
+/// The borrow equation per limb: `x[i] + 256 * borrow_out[i] = y[i] + borrow_in[i] + diff[i]`,
+/// where `borrow_in[0] = 0` and `borrow_in[i] = borrow_out[i-1]` for i > 0.
+pub fn u32_sub<AB: AirBuilder>(
+    builder: &mut AB,
+    x: &[AB::Var; 4],
+    y: &[AB::Var; 4],
+    diff: &[AB::Var; 4],
+    borrows: &[AB::Var; 4],
+) where
+    AB::F: QuotientMap<u32>,
+{
+    for i in 0..4 {
+        builder.assert_bool(borrows[i]);
+        let borrow_in: AB::Expr = if i == 0 {
+            AB::Expr::ZERO
+        } else {
+            borrows[i - 1].into()
+        };
+        // x[i] + 256 * borrow_out = y[i] + borrow_in + diff[i]
+        builder.assert_eq(
+            x[i].clone() + borrows[i].clone() * AB::F::from_u32(1 << 8),
+            y[i].clone() + borrow_in + diff[i].clone(),
+        );
+    }
+}
+
 /// Assumes that `x` and `y` are normalized byte limbs.
 /// Asserts that `y = x + 1` as u32 with carry propagation.
 pub fn u32_inc<AB: AirBuilder>(

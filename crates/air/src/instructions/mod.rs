@@ -1,5 +1,10 @@
 pub mod add;
 pub mod addi;
 pub mod and;
+pub mod andi;
+pub mod or;
+pub mod ori;
 pub mod sll;
+pub mod sub;
+pub mod xor;
 pub mod xori;
