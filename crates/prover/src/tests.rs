@@ -33,6 +33,15 @@ fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_ori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b110 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
 fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     let word = ((rs2 as u32) << 20)
         | ((rs1 as u32) << 15)
@@ -274,6 +283,34 @@ fn prove_mixed_xor_add() {
     program.extend_from_slice(&encode_addi(2, 0, 0x0F)); // x2 = 0x0F
     program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0xF0
     program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 0xF0 + 0xFF = 0x1EF
+    prove(&program);
+}
+
+/// Single ORI: x2 = x1 | 0xFF. Exercises the bytes_or bus.
+#[test]
+fn prove_single_ori() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_ori(2, 1, 0xFF)); // x2 = 5 | 0xFF = 0xFF
+    prove(&program);
+}
+
+/// ORI with a negative (sign-extended) immediate: x2 = x1 | 0xFFFF_FFFF.
+#[test]
+fn prove_ori_negative_immediate() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_ori(2, 1, -1i16)); // x2 = 42 | 0xFFFF_FFFF = 0xFFFF_FFFF
+    prove(&program);
+}
+
+/// Mixed ADDI + ORI program.
+#[test]
+fn prove_mixed_addi_ori() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+    program.extend_from_slice(&encode_ori(2, 1, 0b0101)); // x2 = 0b1010 | 0b0101 = 0b1111
+    program.extend_from_slice(&encode_ori(3, 2, 0x00)); // x3 = 0b1111 | 0 = 0b1111
     prove(&program);
 }
 

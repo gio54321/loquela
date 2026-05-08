@@ -15,6 +15,7 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 pub struct Instruction<F> {
     pub is_addi: F,
     pub is_xori: F,
+    pub is_ori: F,
     pub is_add: F,
     pub is_sub: F,
     pub is_xor: F,
@@ -24,9 +25,10 @@ pub struct Instruction<F> {
 pub enum InstructionId {
     Addi = 0,
     Xori = 1,
-    Add = 2,
-    Sub = 3,
-    Xor = 4,
+    Ori = 2,
+    Add = 3,
+    Sub = 4,
+    Xor = 5,
 }
 
 #[repr(C)]
@@ -103,12 +105,14 @@ where
         // is_* flags are one-hot booleans.
         builder.assert_bool(local.instr_type.is_addi.clone());
         builder.assert_bool(local.instr_type.is_xori.clone());
+        builder.assert_bool(local.instr_type.is_ori.clone());
         builder.assert_bool(local.instr_type.is_add.clone());
         builder.assert_bool(local.instr_type.is_sub.clone());
         builder.assert_bool(local.instr_type.is_xor.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
+                + local.instr_type.is_ori.clone()
                 + local.instr_type.is_add.clone()
                 + local.instr_type.is_sub.clone()
                 + local.instr_type.is_xor.clone(),
@@ -120,9 +124,12 @@ where
             check_bit_decomposition(builder, limb.clone(), &local.decompositions[i]);
         }
 
-        // Opcode (bits 0..7) == 0b0010011 for ADDI and XORI (I-type).
-        let mut when_op_immediate =
-            builder.when(local.instr_type.is_addi.clone() + local.instr_type.is_xori.clone());
+        // Opcode (bits 0..7) == 0b0010011 for ADDI, XORI, and ORI (I-type).
+        let mut when_op_immediate = builder.when(
+            local.instr_type.is_addi.clone()
+                + local.instr_type.is_xori.clone()
+                + local.instr_type.is_ori.clone(),
+        );
         for i in 0..7 {
             let expected = if (0b0010011u32 >> i) & 1 == 1 {
                 AB::Expr::ONE
@@ -182,6 +189,17 @@ where
                 AB::Expr::ZERO
             };
             when_xori.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // ORI: funct3 == 0b110
+        let mut when_ori = builder.when(local.instr_type.is_ori.clone());
+        for i in 0..3 {
+            let expected = if (0b110u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_ori.assert_eq(local.decompositions[1][4 + i].clone(), expected);
         }
 
         // ADD: funct3 == 0b000
@@ -271,12 +289,13 @@ where
         );
         builder.assert_eq(local.rs2.clone(), rs2_expr);
 
-        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=SUB, 4=XOR.
+        // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ADD, 4=SUB, 5=XOR.
         let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
             + local.instr_type.is_xori.clone() * AB::Expr::ONE
-            + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(2))
-            + local.instr_type.is_sub.clone() * AB::Expr::from(AB::F::from_u32(3))
-            + local.instr_type.is_xor.clone() * AB::Expr::from(AB::F::from_u32(4));
+            + local.instr_type.is_ori.clone() * AB::Expr::from(AB::F::from_u32(2))
+            + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(3))
+            + local.instr_type.is_sub.clone() * AB::Expr::from(AB::F::from_u32(4))
+            + local.instr_type.is_xor.clone() * AB::Expr::from(AB::F::from_u32(5));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -317,10 +336,11 @@ impl<F: Field> LookupAir<F> for DecodeAir {
         }
 
         // For the decode bus field4: use imm for I-type instructions and rs2 for R-type.
-        // is_i_type = is_addi + is_xori (one-hot so sum is 0 or 1, safe to use as multiplier).
+        // is_i_type = is_addi + is_xori + is_ori (one-hot so sum is 0 or 1, safe to use as multiplier).
         // is_r_type = is_add + is_sub + is_xor (one-hot so sum is 0 or 1).
         let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
-            + SymbolicExpression::from(local.instr_type.is_xori);
+            + SymbolicExpression::from(local.instr_type.is_xori)
+            + SymbolicExpression::from(local.instr_type.is_ori);
         let is_r_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_add)
             + SymbolicExpression::from(local.instr_type.is_sub)
             + SymbolicExpression::from(local.instr_type.is_xor);
