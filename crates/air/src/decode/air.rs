@@ -20,6 +20,7 @@ pub struct Instruction<F> {
     pub is_add: F,
     pub is_sub: F,
     pub is_xor: F,
+    pub is_or: F,
 }
 
 #[repr(u8)]
@@ -31,6 +32,7 @@ pub enum InstructionId {
     Add = 4,
     Sub = 5,
     Xor = 6,
+    Or = 7,
 }
 
 #[repr(C)]
@@ -112,6 +114,7 @@ where
         builder.assert_bool(local.instr_type.is_add.clone());
         builder.assert_bool(local.instr_type.is_sub.clone());
         builder.assert_bool(local.instr_type.is_xor.clone());
+        builder.assert_bool(local.instr_type.is_or.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
@@ -119,7 +122,8 @@ where
                 + local.instr_type.is_andi.clone()
                 + local.instr_type.is_add.clone()
                 + local.instr_type.is_sub.clone()
-                + local.instr_type.is_xor.clone(),
+                + local.instr_type.is_xor.clone()
+                + local.instr_type.is_or.clone(),
             AB::Expr::ONE,
         );
 
@@ -144,33 +148,20 @@ where
             when_op_immediate.assert_eq(local.decompositions[0][i].clone(), expected);
         }
 
-        // Opcode (bits 0..7) == 0b0110011 for ADD, SUB, and XOR (R-type).
-        let mut when_add = builder.when(local.instr_type.is_add.clone());
+        // Opcode (bits 0..7) == 0b0110011 for ADD, SUB, XOR, and OR (R-type).
+        let mut when_r_type = builder.when(
+            local.instr_type.is_add.clone()
+                + local.instr_type.is_sub.clone()
+                + local.instr_type.is_xor.clone()
+                + local.instr_type.is_or.clone(),
+        );
         for i in 0..7 {
             let expected = if (0b0110011u32 >> i) & 1 == 1 {
                 AB::Expr::ONE
             } else {
                 AB::Expr::ZERO
             };
-            when_add.assert_eq(local.decompositions[0][i].clone(), expected);
-        }
-        let mut when_sub = builder.when(local.instr_type.is_sub.clone());
-        for i in 0..7 {
-            let expected = if (0b0110011u32 >> i) & 1 == 1 {
-                AB::Expr::ONE
-            } else {
-                AB::Expr::ZERO
-            };
-            when_sub.assert_eq(local.decompositions[0][i].clone(), expected);
-        }
-        let mut when_xor = builder.when(local.instr_type.is_xor.clone());
-        for i in 0..7 {
-            let expected = if (0b0110011u32 >> i) & 1 == 1 {
-                AB::Expr::ONE
-            } else {
-                AB::Expr::ZERO
-            };
-            when_xor.assert_eq(local.decompositions[0][i].clone(), expected);
+            when_r_type.assert_eq(local.decompositions[0][i].clone(), expected);
         }
 
         // funct3 = bits 12..15 of the instruction word — that's bits 4..7 of byte 1.
@@ -224,6 +215,17 @@ where
             when_add.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
         }
 
+        // OR: funct3 == 0b110
+        let mut when_or = builder.when(local.instr_type.is_or.clone());
+        for i in 0..3 {
+            let expected = if (0b110u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_or.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
         // ADD: funct7 (bits 25..32) == 0b0000000 — bits 1..7 of byte 3.
         let mut when_add = builder.when(local.instr_type.is_add.clone());
         for i in 1..8 {
@@ -260,6 +262,12 @@ where
         let mut when_xor = builder.when(local.instr_type.is_xor.clone());
         for i in 1..8 {
             when_xor.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
+        }
+
+        // OR: funct7 (bits 25..32) == 0b0000000 — bits 1..7 of byte 3.
+        let mut when_or = builder.when(local.instr_type.is_or.clone());
+        for i in 1..8 {
+            when_or.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
         }
 
         // rd = bits 7..12 (1 bit in byte 0, 4 bits in byte 1).
@@ -305,14 +313,22 @@ where
         );
         builder.assert_eq(local.rs2.clone(), rs2_expr);
 
-        // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ANDI, 4=ADD, 5=SUB, 6=XOR.
-        let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
-            + local.instr_type.is_xori.clone() * AB::Expr::ONE
-            + local.instr_type.is_ori.clone() * AB::Expr::from(AB::F::from_u32(2))
-            + local.instr_type.is_andi.clone() * AB::Expr::from(AB::F::from_u32(3))
-            + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(4))
-            + local.instr_type.is_sub.clone() * AB::Expr::from(AB::F::from_u32(5))
-            + local.instr_type.is_xor.clone() * AB::Expr::from(AB::F::from_u32(6));
+        let packed = local.instr_type.is_addi.clone()
+            * AB::Expr::from(AB::F::from_u64(InstructionId::Addi as u64))
+            + local.instr_type.is_xori.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Xori as u64))
+            + local.instr_type.is_ori.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Ori as u64))
+            + local.instr_type.is_andi.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Andi as u64))
+            + local.instr_type.is_add.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Add as u64))
+            + local.instr_type.is_sub.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Sub as u64))
+            + local.instr_type.is_xor.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Xor as u64))
+            + local.instr_type.is_or.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Or as u64));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -354,14 +370,15 @@ impl<F: Field> LookupAir<F> for DecodeAir {
 
         // For the decode bus field4: use imm for I-type instructions and rs2 for R-type.
         // is_i_type = is_addi + is_xori + is_ori + is_andi (one-hot so sum is 0 or 1, safe to use as multiplier).
-        // is_r_type = is_add + is_sub + is_xor (one-hot so sum is 0 or 1).
+        // is_r_type = is_add + is_sub + is_xor + is_or (one-hot so sum is 0 or 1).
         let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
             + SymbolicExpression::from(local.instr_type.is_xori)
             + SymbolicExpression::from(local.instr_type.is_ori)
             + SymbolicExpression::from(local.instr_type.is_andi);
         let is_r_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_add)
             + SymbolicExpression::from(local.instr_type.is_sub)
-            + SymbolicExpression::from(local.instr_type.is_xor);
+            + SymbolicExpression::from(local.instr_type.is_xor)
+            + SymbolicExpression::from(local.instr_type.is_or);
         let field4: SymbolicExpression<F> = is_i_type * SymbolicExpression::from(local.imm)
             + is_r_type * SymbolicExpression::from(local.rs2);
 
