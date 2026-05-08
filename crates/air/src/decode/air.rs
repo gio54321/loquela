@@ -36,6 +36,12 @@ pub struct Instruction<F> {
     pub is_auipc: F,
     pub is_jal: F,
     pub is_jalr: F,
+    pub is_beq: F,
+    pub is_bne: F,
+    pub is_blt: F,
+    pub is_bge: F,
+    pub is_bltu: F,
+    pub is_bgeu: F,
 }
 
 #[repr(u8)]
@@ -63,6 +69,12 @@ pub enum InstructionId {
     Auipc = 20,
     Jal = 21,
     Jalr = 22,
+    Beq = 23,
+    Bne = 24,
+    Blt = 25,
+    Bge = 26,
+    Bltu = 27,
+    Bgeu = 28,
 }
 
 #[repr(C)]
@@ -165,6 +177,12 @@ where
         builder.assert_bool(local.instr_type.is_auipc.clone());
         builder.assert_bool(local.instr_type.is_jal.clone());
         builder.assert_bool(local.instr_type.is_jalr.clone());
+        builder.assert_bool(local.instr_type.is_beq.clone());
+        builder.assert_bool(local.instr_type.is_bne.clone());
+        builder.assert_bool(local.instr_type.is_blt.clone());
+        builder.assert_bool(local.instr_type.is_bge.clone());
+        builder.assert_bool(local.instr_type.is_bltu.clone());
+        builder.assert_bool(local.instr_type.is_bgeu.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
@@ -188,7 +206,13 @@ where
                 + local.instr_type.is_lui.clone()
                 + local.instr_type.is_auipc.clone()
                 + local.instr_type.is_jal.clone()
-                + local.instr_type.is_jalr.clone(),
+                + local.instr_type.is_jalr.clone()
+                + local.instr_type.is_beq.clone()
+                + local.instr_type.is_bne.clone()
+                + local.instr_type.is_blt.clone()
+                + local.instr_type.is_bge.clone()
+                + local.instr_type.is_bltu.clone()
+                + local.instr_type.is_bgeu.clone(),
             AB::Expr::ONE,
         );
 
@@ -572,6 +596,79 @@ where
             when_auipc.assert_eq(local.decompositions[0][i].clone(), expected);
         }
 
+        // B-type instructions: opcode == 0b1100011.
+        let is_b_type: AB::Expr = local.instr_type.is_beq.clone()
+            + local.instr_type.is_bne.clone()
+            + local.instr_type.is_blt.clone()
+            + local.instr_type.is_bge.clone()
+            + local.instr_type.is_bltu.clone()
+            + local.instr_type.is_bgeu.clone();
+        let mut when_b_type = builder.when(is_b_type);
+        for i in 0..7 {
+            let expected = if (0b1100011u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_b_type.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+
+        // BEQ: funct3 == 0b000.
+        let mut when_beq = builder.when(local.instr_type.is_beq.clone());
+        for i in 0..3 {
+            when_beq.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
+        }
+
+        // BNE: funct3 == 0b001.
+        let mut when_bne = builder.when(local.instr_type.is_bne.clone());
+        for i in 0..3 {
+            let expected = if (0b001u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_bne.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // BLT: funct3 == 0b100.
+        let mut when_blt = builder.when(local.instr_type.is_blt.clone());
+        for i in 0..3 {
+            let expected = if (0b100u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_blt.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // BGE: funct3 == 0b101.
+        let mut when_bge = builder.when(local.instr_type.is_bge.clone());
+        for i in 0..3 {
+            let expected = if (0b101u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_bge.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // BLTU: funct3 == 0b110.
+        let mut when_bltu = builder.when(local.instr_type.is_bltu.clone());
+        for i in 0..3 {
+            let expected = if (0b110u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_bltu.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // BGEU: funct3 == 0b111.
+        let mut when_bgeu = builder.when(local.instr_type.is_bgeu.clone());
+        for i in 0..3 {
+            when_bgeu.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ONE);
+        }
+
         // imm_low8: lower 8 bits of the U-type 20-bit immediate (bits 19:12 of instruction).
         // = bits 15:12 (decompositions[1][4..7]) | bits 19:16 (decompositions[2][0..3]).
         let imm_low8_expr = pack_bits::<AB, 4>(
@@ -647,7 +744,7 @@ where
         // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ANDI, 4=ADD, 5=SUB, 6=XOR, 7=OR,
         //                    8=AND, 9=SLL, 10=SRL, 11=SRA, 12=SLLI, 13=SRLI, 14=SRAI,
         //                    15=SLT, 16=SLTU, 17=SLTI, 18=SLTIU, 19=LUI, 20=AUIPC,
-        //                    21=JAL, 22=JALR.
+        //                    21=JAL, 22=JALR, 23=BEQ, 24=BNE, 25=BLT, 26=BGE, 27=BLTU, 28=BGEU.
         let packed = local.instr_type.is_addi.clone()
             * AB::Expr::from(AB::F::from_u64(InstructionId::Addi as u64))
             + local.instr_type.is_xori.clone()
@@ -693,7 +790,19 @@ where
             + local.instr_type.is_jal.clone()
                 * AB::Expr::from(AB::F::from_u64(InstructionId::Jal as u64))
             + local.instr_type.is_jalr.clone()
-                * AB::Expr::from(AB::F::from_u64(InstructionId::Jalr as u64));
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Jalr as u64))
+            + local.instr_type.is_beq.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Beq as u64))
+            + local.instr_type.is_bne.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Bne as u64))
+            + local.instr_type.is_blt.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Blt as u64))
+            + local.instr_type.is_bge.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Bge as u64))
+            + local.instr_type.is_bltu.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Bltu as u64))
+            + local.instr_type.is_bgeu.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Bgeu as u64));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -737,7 +846,7 @@ impl<F: Field> LookupAir<F> for DecodeAir {
         // rs2 (= imm[4:0] = shamt) for shift-immediate (SLLI/SRLI/SRAI),
         // rs2 for R-type (ADD/SUB/XOR/OR/AND/SLL/SRL/SRA/SLT/SLTU),
         // and imm for U-type (LUI/AUIPC).
-        // JAL uses the "decode_j" bus instead.
+        // JAL uses the "decode_j" bus; B-type uses "decode_b" bus instead.
         let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
             + SymbolicExpression::from(local.instr_type.is_xori)
             + SymbolicExpression::from(local.instr_type.is_ori)
@@ -765,14 +874,24 @@ impl<F: Field> LookupAir<F> for DecodeAir {
             + SymbolicExpression::from(local.instr_type.is_auipc);
         // JAL: handled on the "decode_j" bus.
         let is_jal: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_jal);
+        // B-type: handled on the "decode_b" bus.
+        let is_b_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_beq)
+            + SymbolicExpression::from(local.instr_type.is_bne)
+            + SymbolicExpression::from(local.instr_type.is_blt)
+            + SymbolicExpression::from(local.instr_type.is_bge)
+            + SymbolicExpression::from(local.instr_type.is_bltu)
+            + SymbolicExpression::from(local.instr_type.is_bgeu);
         let field4: SymbolicExpression<F> = is_i_type * SymbolicExpression::from(local.imm)
             + (is_r_type + is_shift_imm) * SymbolicExpression::from(local.rs2)
             + is_u_type.clone() * SymbolicExpression::from(local.imm);
 
-        // Export the decoded instruction for non-U-type, non-JAL instructions.
-        // U-type (LUI/AUIPC) rows use "decode_u" bus; JAL rows use "decode_j" bus.
-        let is_standard: SymbolicExpression<F> =
-            SymbolicExpression::from(F::ONE) - is_u_type.clone() - is_jal.clone();
+        // Export the decoded instruction for non-U-type, non-JAL, non-B-type instructions.
+        // U-type (LUI/AUIPC) rows use "decode_u" bus; JAL rows use "decode_j" bus;
+        // B-type rows use "decode_b" bus.
+        let is_standard: SymbolicExpression<F> = SymbolicExpression::from(F::ONE)
+            - is_u_type.clone()
+            - is_jal.clone()
+            - is_b_type.clone();
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
@@ -819,6 +938,51 @@ impl<F: Field> LookupAir<F> for DecodeAir {
                     local.imm_low8.into(),
                 ],
                 (local.mult.clone() * is_jal).into(),
+                Direction::Receive,
+            )],
+        ));
+
+        // For B-type (BEQ/BNE/BLT/BGE/BLTU/BGEU): export decoded instruction on the "decode_b" bus.
+        // Schema: (instr_type_packed, rs1, rs2, imm_top7, imm_lo5)
+        // imm_top7 = {imm[12], imm[10:5]} packed as 7-bit value
+        //          = decompositions[3][1..=7] packed (bit31=imm[12] is MSB, bits30:25=imm[10:5])
+        // imm_lo5  = {imm[11], imm[4:1]} packed as 5-bit value
+        //          = decompositions[1][0..=3] (imm[4:1]) and decompositions[0][7] (imm[11])
+        let imm_top7_b: SymbolicExpression<F> =
+            SymbolicExpression::from(local.decompositions[3][1]) * SymbolicExpression::from(F::ONE)
+                + SymbolicExpression::from(local.decompositions[3][2])
+                    * SymbolicExpression::from(F::from_u64(2))
+                + SymbolicExpression::from(local.decompositions[3][3])
+                    * SymbolicExpression::from(F::from_u64(4))
+                + SymbolicExpression::from(local.decompositions[3][4])
+                    * SymbolicExpression::from(F::from_u64(8))
+                + SymbolicExpression::from(local.decompositions[3][5])
+                    * SymbolicExpression::from(F::from_u64(16))
+                + SymbolicExpression::from(local.decompositions[3][6])
+                    * SymbolicExpression::from(F::from_u64(32))
+                + SymbolicExpression::from(local.decompositions[3][7])
+                    * SymbolicExpression::from(F::from_u64(64));
+        let imm_lo5_b: SymbolicExpression<F> = SymbolicExpression::from(local.decompositions[1][0])
+            * SymbolicExpression::from(F::ONE)
+            + SymbolicExpression::from(local.decompositions[1][1])
+                * SymbolicExpression::from(F::from_u64(2))
+            + SymbolicExpression::from(local.decompositions[1][2])
+                * SymbolicExpression::from(F::from_u64(4))
+            + SymbolicExpression::from(local.decompositions[1][3])
+                * SymbolicExpression::from(F::from_u64(8))
+            + SymbolicExpression::from(local.decompositions[0][7])
+                * SymbolicExpression::from(F::from_u64(16));
+        lookups.push(self.register_lookup(
+            Kind::Global(String::from("decode_b")),
+            &vec![(
+                vec![
+                    local.instr_type_packed.into(),
+                    local.rs1.into(),
+                    local.rs2.into(),
+                    imm_top7_b,
+                    imm_lo5_b,
+                ],
+                (local.mult.clone() * is_b_type).into(),
                 Direction::Receive,
             )],
         ));
