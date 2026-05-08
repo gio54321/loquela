@@ -18,6 +18,10 @@ pub enum Instruction {
     Sll { rd: u8, rs1: u8, rs2: u8 },
     Srl { rd: u8, rs1: u8, rs2: u8 },
     Sra { rd: u8, rs1: u8, rs2: u8 },
+    Slt { rd: u8, rs1: u8, rs2: u8 },
+    Sltu { rd: u8, rs1: u8, rs2: u8 },
+    SltiI { rd: u8, rs1: u8, imm: i32 },
+    SltiuI { rd: u8, rs1: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -380,6 +384,120 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Slt { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = if (rs1_val as i32) < (rs2_val as i32) {
+                    1u32
+                } else {
+                    0u32
+                };
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::Sltu { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = if rs1_val < rs2_val { 1u32 } else { 0u32 };
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::SltiI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let result = if (rs1_val as i32) < *imm { 1u32 } else { 0u32 };
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::SltiuI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                // imm is sign-extended; comparison is unsigned
+                let imm_u32 = *imm as u32;
+                let result = if rs1_val < imm_u32 { 1u32 } else { 0u32 };
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -480,6 +598,32 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let rs2 = ((bytes >> 20) & 0b11111) as u8;
             Instruction::Sra { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b010
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Slt { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b011
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Sltu { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b010 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::SltiI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011 && (bytes >> 12) & 0b111 == 0b011 {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::SltiuI { rd, rs1, imm }
         } else {
             unimplemented!("not supported");
         }
