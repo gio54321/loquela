@@ -295,11 +295,12 @@ impl<F: Field> LookupAir<F> for SraiAir {
             )],
         ));
 
-        // Assert the decoded instruction is SRAI with (rd, rs1, imm) from the "decode" bus.
+        // Assert the decoded instruction is SRAI with (pc, rd, rs1, imm) from the "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                once(F::from_u64(InstructionId::Srai as u64).into())
+                local.pc.into_iter().map(Into::into)
+                    .chain(once(F::from_u64(InstructionId::Srai as u64).into()))
                     .chain([local.rd, local.rs1, local.imm].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),

@@ -275,11 +275,12 @@ impl<F: Field> LookupAir<F> for SllAir {
             )],
         ));
 
-        // Assert the decoded instruction is SLL with (rd, rs1, rs2) from the "decode" bus.
+        // Assert the decoded instruction is SLL with (pc, rd, rs1, rs2) from the "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                once(F::from_u64(InstructionId::Sll as u64).into())
+                local.pc.into_iter().map(Into::into)
+                    .chain(once(F::from_u64(InstructionId::Sll as u64).into()))
                     .chain([local.rd, local.rs1, local.rs2].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),
