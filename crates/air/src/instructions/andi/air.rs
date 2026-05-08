@@ -9,17 +9,17 @@ use p3_air::{
 use p3_field::{integers::QuotientMap, Field, PrimeCharacteristicRing};
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 
-/// One row per XORI instruction execution.
+/// One row per ANDI instruction execution.
 ///
 /// Wiring:
 ///   - Receives `(pc[0..4], timestamp)` from the "trace" bus (current execution state).
-///   - Sends `(InstructionId::Xori, rd, rs1, imm)` to the "decode" bus.
+///   - Sends `(InstructionId::Andi, rd, rs1, imm)` to the "decode" bus.
 ///   - Sends two operations to the "memory" bus: read rs1, write rd.
-///   - Sends four byte-pair tuples to the "bytes_xor" bus, proving
-///     `rd_new_value[i] = rs1_value[i] ^ imm_se_bytes[i]`.
+///   - Sends four byte-pair tuples to the "bytes_and" bus, proving
+///     `rd_new_value[i] = rs1_value[i] & imm_se_bytes[i]`.
 ///   - Sends `(next_pc[0..4], timestamp + 2)` to the "trace" bus (next execution state).
 #[repr(C)]
-pub struct XoriColumns<F> {
+pub struct AndiColumns<F> {
     /// Current program counter as four byte limbs (little-endian u32).
     pub pc: [F; 4],
     /// Timestamp at the start of this instruction.
@@ -42,7 +42,7 @@ pub struct XoriColumns<F> {
     pub rs1_value: [F; 4],
     /// Old value of register `rd` (before write).
     pub old_rd_value: [F; 4],
-    /// New value written to `rd`: `rs1_value ^ sign_extend(imm)`.
+    /// New value written to `rd`: `rs1_value & sign_extend(imm)`.
     pub rd_new_value: [F; 4],
 
     /// `pc + 4` as four byte limbs, constrained by `u32_plus_four`.
@@ -55,12 +55,12 @@ pub struct XoriColumns<F> {
     pub is_dummy: F,
 }
 
-pub const NUM_XORI_COLS: usize = size_of::<XoriColumns<u8>>();
+pub const NUM_ANDI_COLS: usize = size_of::<AndiColumns<u8>>();
 
-impl<T> Borrow<XoriColumns<T>> for [T] {
-    fn borrow(&self) -> &XoriColumns<T> {
-        debug_assert_eq!(self.len(), NUM_XORI_COLS);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<XoriColumns<T>>() };
+impl<T> Borrow<AndiColumns<T>> for [T] {
+    fn borrow(&self) -> &AndiColumns<T> {
+        debug_assert_eq!(self.len(), NUM_ANDI_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<AndiColumns<T>>() };
         debug_assert!(prefix.is_empty(), "Alignment should match");
         debug_assert!(suffix.is_empty(), "Alignment should match");
         debug_assert_eq!(shorts.len(), 1);
@@ -68,10 +68,10 @@ impl<T> Borrow<XoriColumns<T>> for [T] {
     }
 }
 
-impl<T> BorrowMut<XoriColumns<T>> for [T] {
-    fn borrow_mut(&mut self) -> &mut XoriColumns<T> {
-        debug_assert_eq!(self.len(), NUM_XORI_COLS);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<XoriColumns<T>>() };
+impl<T> BorrowMut<AndiColumns<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut AndiColumns<T> {
+        debug_assert_eq!(self.len(), NUM_ANDI_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<AndiColumns<T>>() };
         debug_assert!(prefix.is_empty(), "Alignment should match");
         debug_assert!(suffix.is_empty(), "Alignment should match");
         debug_assert_eq!(shorts.len(), 1);
@@ -80,36 +80,36 @@ impl<T> BorrowMut<XoriColumns<T>> for [T] {
 }
 
 #[derive(Clone)]
-pub struct XoriAir {
+pub struct AndiAir {
     num_lookups: usize,
 }
 
-impl XoriAir {
+impl AndiAir {
     pub fn new() -> Self {
         Self { num_lookups: 0 }
     }
 }
 
-impl Default for XoriAir {
+impl Default for AndiAir {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F> BaseAir<F> for XoriAir {
+impl<F> BaseAir<F> for AndiAir {
     fn width(&self) -> usize {
-        NUM_XORI_COLS
+        NUM_ANDI_COLS
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for XoriAir
+impl<AB: AirBuilder> Air<AB> for AndiAir
 where
     AB::MainWindow: WindowAccess<AB::Var>,
     AB::F: PrimeCharacteristicRing + QuotientMap<u32>,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &XoriColumns<AB::Var> = main.current_slice().borrow();
+        let local: &AndiColumns<AB::Var> = main.current_slice().borrow();
 
         builder.assert_bool(local.is_dummy.clone());
 
@@ -152,7 +152,7 @@ where
     }
 }
 
-impl<F: Field> LookupAir<F> for XoriAir {
+impl<F: Field> LookupAir<F> for AndiAir {
     fn add_lookup_columns(&mut self) -> Vec<usize> {
         let new_idx = self.num_lookups;
         self.num_lookups += 1;
@@ -167,7 +167,7 @@ impl<F: Field> LookupAir<F> for XoriAir {
             ..Default::default()
         });
         let symbolic_main = symbolic_air_builder.main();
-        let local: &XoriColumns<SymbolicVariable<F>> = symbolic_main.current_slice().borrow();
+        let local: &AndiColumns<SymbolicVariable<F>> = symbolic_main.current_slice().borrow();
 
         let mut lookups = Vec::new();
 
@@ -175,7 +175,9 @@ impl<F: Field> LookupAir<F> for XoriAir {
         lookups.push(self.register_lookup(
             Kind::Global(String::from("trace")),
             &vec![(
-                local.pc.into_iter()
+                local
+                    .pc
+                    .into_iter()
                     .chain(once(local.timestamp))
                     .map(Into::into)
                     .collect(),
@@ -184,12 +186,12 @@ impl<F: Field> LookupAir<F> for XoriAir {
             )],
         ));
 
-        // Assert the decoded instruction is XORI with (pc, rd, rs1, imm) from the "decode" bus.
+        // Assert the decoded instruction is ANDI with (pc, rd, rs1, imm) from the "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
                 local.pc.into_iter().map(Into::into)
-                    .chain(once(F::from_u64(InstructionId::Xori as u64).into()))
+                    .chain(once(F::from_u64(InstructionId::Andi as u64).into()))
                     .chain([local.rd, local.rs1, local.imm].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),
@@ -215,7 +217,7 @@ impl<F: Field> LookupAir<F> for XoriAir {
             )],
         ));
 
-        // Write the XOR result to register rd at timestamp + 1.
+        // Write the AND result to register rd at timestamp + 1.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("memory")),
             &vec![(
@@ -231,7 +233,7 @@ impl<F: Field> LookupAir<F> for XoriAir {
             )],
         ));
 
-        // Four byte-level XOR lookups: rd_new[i] = rs1_value[i] ^ imm_se_bytes[i].
+        // Four byte-level AND lookups: rd_new[i] = rs1_value[i] & imm_se_bytes[i].
         // These also implicitly range-check all three operand bytes to [0, 255].
         lookups.extend(
             local
@@ -241,7 +243,7 @@ impl<F: Field> LookupAir<F> for XoriAir {
                 .zip(local.rd_new_value.into_iter())
                 .map(|((x, y), z)| {
                     self.register_lookup(
-                        Kind::Global(String::from("bytes_xor")),
+                        Kind::Global(String::from("bytes_and")),
                         &vec![(
                             [x, y, z].into_iter().map(Into::into).collect(),
                             local.is_dummy.into(),
@@ -256,7 +258,9 @@ impl<F: Field> LookupAir<F> for XoriAir {
         lookups.push(self.register_lookup(
             Kind::Global(String::from("trace")),
             &vec![(
-                local.next_pc.into_iter()
+                local
+                    .next_pc
+                    .into_iter()
                     .map(Into::into)
                     .chain(once((local.timestamp.clone() + F::from_u64(2)).into()))
                     .collect(),
