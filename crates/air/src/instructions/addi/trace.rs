@@ -1,6 +1,6 @@
+use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 
 use super::air::{AddiColumns, NUM_ADDI_COLS};
 

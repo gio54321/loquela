@@ -37,6 +37,7 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let is_addi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b000;
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
     let is_ori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b110;
+    let is_andi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b111;
     let is_add =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
     let is_sub =
@@ -48,21 +49,24 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
         is_ori: F::from_bool(is_ori),
+        is_andi: F::from_bool(is_andi),
         is_add: F::from_bool(is_add),
         is_sub: F::from_bool(is_sub),
         is_xor: F::from_bool(is_xor),
     };
-    // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ADD, 4=SUB, 5=XOR.
+    // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ANDI, 4=ADD, 5=SUB, 6=XOR.
     row.instr_type_packed = if is_xori {
         F::ONE
     } else if is_ori {
         F::from_u64(2)
-    } else if is_add {
+    } else if is_andi {
         F::from_u64(3)
-    } else if is_sub {
+    } else if is_add {
         F::from_u64(4)
-    } else if is_xor {
+    } else if is_sub {
         F::from_u64(5)
+    } else if is_xor {
+        F::from_u64(6)
     } else {
         F::ZERO
     };
