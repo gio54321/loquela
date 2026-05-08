@@ -23,6 +23,46 @@ fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_sw(rs1: u8, rs2: u8, imm: i16) -> [u8; 4] {
+    // S-type: imm[11:5] in bits 31:25, imm[4:0] in bits 11:7.
+    let imm_u = imm as u32 & 0xFFF;
+    let imm_hi = (imm_u >> 5) & 0x7F;
+    let imm_lo = imm_u & 0x1F;
+    let word = (imm_hi << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b010 << 12)
+        | (imm_lo << 7)
+        | 0b010_0011;
+    word.to_le_bytes()
+}
+
+fn encode_sh(rs1: u8, rs2: u8, imm: i16) -> [u8; 4] {
+    let imm_u = imm as u32 & 0xFFF;
+    let imm_hi = (imm_u >> 5) & 0x7F;
+    let imm_lo = imm_u & 0x1F;
+    let word = (imm_hi << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b001 << 12)
+        | (imm_lo << 7)
+        | 0b010_0011;
+    word.to_le_bytes()
+}
+
+fn encode_sb(rs1: u8, rs2: u8, imm: i16) -> [u8; 4] {
+    let imm_u = imm as u32 & 0xFFF;
+    let imm_hi = (imm_u >> 5) & 0x7F;
+    let imm_lo = imm_u & 0x1F;
+    let word = (imm_hi << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b000 << 12)
+        | (imm_lo << 7)
+        | 0b010_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -185,6 +225,91 @@ fn negative_memory_write_value() {
         !prove_and_verify(traces),
         "corrupted memory write should fail verification"
     );
+}
+
+// ── Store instruction tests ───────────────────────────────────────────────────
+
+/// Single SW: store a word to RAM. Exercises the store path end-to-end.
+#[test]
+fn prove_single_sw() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42 (value to store)
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0 (address base)
+    program.extend_from_slice(&encode_sw(2, 1, 0)); // MEM[0] = x1 = 42
+    prove(&program);
+}
+
+/// Single SH: store a halfword to RAM with upper bits zeroed.
+#[test]
+fn prove_single_sh() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x55)); // x1 = 0x55 (low byte set)
+    program.extend_from_slice(&encode_addi(2, 0, 4)); // x2 = 4 (address)
+    program.extend_from_slice(&encode_sh(2, 1, 0)); // MEM[4] = x1 & 0xFFFF = 0x55
+    prove(&program);
+}
+
+/// Single SB: store a byte to RAM with upper 3 bytes zeroed.
+#[test]
+fn prove_single_sb() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x7F)); // x1 = 0x7F
+    program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (address)
+    program.extend_from_slice(&encode_sb(2, 1, 0)); // MEM[8] = x1 & 0xFF = 0x7F
+    prove(&program);
+}
+
+/// SW with a positive immediate offset.
+#[test]
+fn prove_sw_with_positive_offset() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 100)); // x1 = 100 (value)
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0 (base address)
+    program.extend_from_slice(&encode_sw(2, 1, 4)); // MEM[4] = 100
+    prove(&program);
+}
+
+/// SW with a negative immediate offset.
+#[test]
+fn prove_sw_with_negative_offset() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 77)); // x1 = 77 (value)
+    program.extend_from_slice(&encode_addi(2, 0, 16)); // x2 = 16 (base address)
+    program.extend_from_slice(&encode_sw(2, 1, -4i16)); // MEM[12] = 77
+    prove(&program);
+}
+
+/// SH upper bits are zeroed: storing 0xDEAD should result in 0x0000DEAD in RAM.
+#[test]
+fn prove_sh_upper_bits_zeroed() {
+    let mut program = Vec::new();
+    // Load 0xDEAD into x1 via ADDI chain (ADDI sign-extends from 12-bit, use 0x7FF for positive).
+    program.extend_from_slice(&encode_addi(1, 0, 0x55)); // x1 = 0x55
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0 (address base)
+    program.extend_from_slice(&encode_sh(2, 1, 0)); // MEM[0] = 0x0055 (upper bytes zeroed)
+    prove(&program);
+}
+
+/// SB upper bits are zeroed: storing 0xFFFF_FFFF should store only byte 0xFF.
+#[test]
+fn prove_sb_upper_bits_zeroed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // x2 = 0 (address base)
+    program.extend_from_slice(&encode_sb(2, 1, 0)); // MEM[0] = 0x0000_00FF
+    prove(&program);
+}
+
+/// Mixed SW + SH + SB in one program.
+#[test]
+fn prove_mixed_stores() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x12)); // x1 = 0x12
+    program.extend_from_slice(&encode_addi(2, 0, 100)); // x2 = 100 (base address)
+    program.extend_from_slice(&encode_sw(2, 1, 0)); // MEM[100] = 0x12
+    program.extend_from_slice(&encode_sh(2, 1, 4)); // MEM[104] = 0x0012
+    program.extend_from_slice(&encode_sb(2, 1, 8)); // MEM[108] = 0x12
+    prove(&program);
 }
 
 /// Set `is_address_equal` to a non-boolean value (2) in a memory row.
