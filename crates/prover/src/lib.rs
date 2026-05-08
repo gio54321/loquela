@@ -932,8 +932,11 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let memory = loquela_air::memory::trace::build_trace::<Val>(&all_ops);
 
     let n_decode_steps = steps.len();
+    // decode::trace::build_trace pads to next_power_of_two().max(4); mirror that here
+    // so the program AIR's PC=0..3 multiplicities account for every padding-row fetch.
     let num_decode_padding = n_decode_steps
         .next_power_of_two()
+        .max(4)
         .saturating_sub(n_decode_steps);
     let program_trace =
         loquela_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
@@ -1484,6 +1487,8 @@ pub fn prove_traces(all_traces: AllTraces) -> BatchProof<MyConfig> {
 pub fn prove(program: &[u8]) -> BatchProof<MyConfig> {
     prove_traces(generate_traces(program))
 }
+
+pub mod debug;
 
 #[cfg(test)]
 mod tests;
