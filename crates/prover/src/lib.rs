@@ -15,19 +15,20 @@ use p3_mersenne_31::Mersenne31;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkConfig;
 
-use punctum_air::boundaries::air::BoundariesAir;
-use punctum_air::decode::air::DecodeAir;
-use punctum_air::instructions::add::air::AddAir;
-use punctum_air::instructions::addi::air::AddiAir;
-use punctum_air::instructions::xori::air::XoriAir;
-use punctum_air::memory::air::MemoryAir;
-use punctum_air::primitives::byte_less_than_lookup::LessThanAir;
-use punctum_air::primitives::byte_lookup::BytesAir;
-use punctum_air::primitives::timestamp_less_than::TimestampLessThanAir;
-use punctum_air::primitives::u32_less_than_lookup::U32LessThanAir;
-use punctum_air::primitives::xor_lookup::XorAir;
-use punctum_air::program::air::ProgramAir;
-use punctum_vm::{Instruction, MemoryOperation, VM};
+use loquela_air::boundaries::air::BoundariesAir;
+use loquela_air::decode::air::DecodeAir;
+use loquela_air::instructions::add::air::AddAir;
+use loquela_air::instructions::addi::air::AddiAir;
+use loquela_air::instructions::sub::air::SubAir;
+use loquela_air::instructions::xori::air::XoriAir;
+use loquela_air::memory::air::MemoryAir;
+use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
+use loquela_air::primitives::byte_lookup::BytesAir;
+use loquela_air::primitives::timestamp_less_than::TimestampLessThanAir;
+use loquela_air::primitives::u32_less_than_lookup::U32LessThanAir;
+use loquela_air::primitives::xor_lookup::XorAir;
+use loquela_air::program::air::ProgramAir;
+use loquela_vm::{Instruction, MemoryOperation, VM};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ pub enum LoquelAir {
     Decode(DecodeAir),
     Add(AddAir),
     Addi(AddiAir),
+    Sub(SubAir),
     Xori(XoriAir),
     Memory(MemoryAir),
     Program(ProgramAir),
@@ -88,6 +90,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Decode(a) => BaseAir::<F>::width(a),
             LoquelAir::Add(a) => BaseAir::<F>::width(a),
             LoquelAir::Addi(a) => BaseAir::<F>::width(a),
+            LoquelAir::Sub(a) => BaseAir::<F>::width(a),
             LoquelAir::Xori(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
@@ -122,6 +125,7 @@ where
             LoquelAir::Decode(a) => a.eval(builder),
             LoquelAir::Add(a) => a.eval(builder),
             LoquelAir::Addi(a) => a.eval(builder),
+            LoquelAir::Sub(a) => a.eval(builder),
             LoquelAir::Xori(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
@@ -141,6 +145,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Add(a) => <AddAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Sub(a) => <SubAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
@@ -160,6 +165,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Decode(a) => <DecodeAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Add(a) => <AddAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Sub(a) => <SubAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
@@ -190,6 +196,8 @@ pub struct AllTraces {
     pub add: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains ADDI instructions.
     pub addi: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SUB instructions.
+    pub sub: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains XORI instructions.
     pub xori: Option<RowMajorMatrix<Val>>,
 }
@@ -210,6 +218,7 @@ impl AllTraces {
             bytes_lt,
             add,
             addi,
+            sub,
             xori,
         } = self;
         let mut traces = vec![
@@ -227,6 +236,9 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = addi {
+            traces.push(t);
+        }
+        if let Some(t) = sub {
             traces.push(t);
         }
         if let Some(t) = xori {
@@ -365,6 +377,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_addi = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::AddI { .. }));
+    let has_sub = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Sub { .. }));
     let has_xori = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::XorI { .. }));
@@ -376,45 +391,52 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let final_pc_bytes = (final_step.state.pc + 4).to_le_bytes();
     let final_pc: [Val; 4] = final_pc_bytes.map(|b| Val::from_u64(b as u64));
     let final_ts = Val::from_u64(vm.timestamp as u64);
-    let boundaries = punctum_air::boundaries::air::build_trace(final_pc, final_ts);
+    let boundaries = loquela_air::boundaries::air::build_trace(final_pc, final_ts);
 
-    let decode = punctum_air::decode::trace::build_trace::<Val>(steps);
+    let decode = loquela_air::decode::trace::build_trace::<Val>(steps);
 
     let add_trace = if has_add {
-        Some(punctum_air::instructions::add::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::add::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
     let addi_trace = if has_addi {
-        Some(punctum_air::instructions::addi::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::addi::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let sub_trace = if has_sub {
+        Some(loquela_air::instructions::sub::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
     let xori_trace = if has_xori {
-        Some(punctum_air::instructions::xori::trace::build_trace::<Val>(
+        Some(loquela_air::instructions::xori::trace::build_trace::<Val>(
             steps,
         ))
     } else {
         None
     };
 
-    let memory = punctum_air::memory::trace::build_trace::<Val>(&all_ops);
+    let memory = loquela_air::memory::trace::build_trace::<Val>(&all_ops);
 
     let n_decode_steps = steps.len();
     let num_decode_padding = n_decode_steps
         .next_power_of_two()
         .saturating_sub(n_decode_steps);
     let program_trace =
-        punctum_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
+        loquela_air::program::trace::build_trace::<Val>(program, steps, num_decode_padding);
 
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new)
-    // and ADD (rs1, rs2, rd_new).
+    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new),
+    // ADD (rs1, rs2, rd_new), and SUB (rs1, rs2, rd_new).
     let mut byte_checked_vals: Vec<u32> = Vec::new();
     for s in steps.iter() {
         match s.memory_ops.as_slice() {
@@ -425,7 +447,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rd);
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
-                if matches!(s.instruction, Instruction::Add { .. }) =>
+                if matches!(
+                    s.instruction,
+                    Instruction::Add { .. } | Instruction::Sub { .. }
+                ) =>
             {
                 byte_checked_vals.push(*rs1);
                 byte_checked_vals.push(*rs2);
@@ -435,7 +460,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         }
     }
     let bytes_mults = bytes_multiplicities(&byte_checked_vals);
-    let bytes = punctum_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
+    let bytes = loquela_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
     for s in steps.iter() {
@@ -456,13 +481,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         }
     }
     let xor_mults = xor_multiplicities(&xori_triples);
-    let xor = punctum_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
+    let xor = loquela_air::primitives::xor_lookup::build_trace::<Val>(&xor_mults);
 
-    let u32_lt = punctum_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
+    let u32_lt = loquela_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
     let timestamp_lt =
-        punctum_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
+        loquela_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
     let bytes_lt =
-        punctum_air::primitives::byte_less_than_lookup::build_trace::<Val>(&bytes_lt_mults);
+        loquela_air::primitives::byte_less_than_lookup::build_trace::<Val>(&bytes_lt_mults);
 
     // 4. Assemble AIRs in the same order as the traces vec built in `into_vecs`.
     let mut airs: Vec<LoquelAir> = vec![
@@ -483,6 +508,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_addi {
         airs.push(LoquelAir::Addi(AddiAir::new()));
     }
+    if has_sub {
+        airs.push(LoquelAir::Sub(SubAir::new()));
+    }
     if has_xori {
         airs.push(LoquelAir::Xori(XoriAir::new()));
     }
@@ -500,6 +528,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         bytes_lt,
         add: add_trace,
         addi: addi_trace,
+        sub: sub_trace,
         xori: xori_trace,
     }
 }

@@ -1,10 +1,10 @@
 [package]
-name = "punctum-air"
+name = "loquela-air"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-punctum-vm = { path = "../vm" }
+loquela-vm = { path = "../vm" }
 p3-air = { workspace = true }
 p3-challenger = { workspace = true }
 p3-circle = { workspace = true }

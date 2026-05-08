@@ -1,7 +1,7 @@
 use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
+use loquela_vm::ExecutionStep;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use punctum_vm::ExecutionStep;
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
     let b = v.to_le_bytes();
@@ -38,16 +38,21 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
     let is_add =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
+    let is_sub =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b010_0000;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
         is_add: F::from_bool(is_add),
+        is_sub: F::from_bool(is_sub),
     };
     row.instr_type_packed = if is_xori {
         F::ONE
     } else if is_add {
         F::from_u64(2)
+    } else if is_sub {
+        F::from_u64(3)
     } else {
         F::ZERO
     };
