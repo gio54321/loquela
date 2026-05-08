@@ -33,7 +33,7 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] SRAI
 - [X] ADD
 - [ ] SUB
-- [ ] SLL
+- [X] SLL
 - [ ] SLT
 - [ ] SLTU
 - [ ] XOR
