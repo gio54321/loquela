@@ -3,6 +3,8 @@ pub mod addi;
 pub mod and;
 pub mod andi;
 pub mod auipc;
+pub mod jal;
+pub mod jalr;
 pub mod lui;
 pub mod or;
 pub mod ori;

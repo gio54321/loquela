@@ -96,6 +96,30 @@ fn encode_srl(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_jal(rd: u8, imm: i32) -> [u8; 4] {
+    let imm = imm as u32;
+    let imm20 = (imm >> 20) & 1;
+    let imm10_1 = (imm >> 1) & 0x3FF;
+    let imm11 = (imm >> 11) & 1;
+    let imm19_12 = (imm >> 12) & 0xFF;
+    let word = (imm20 << 31)
+        | (imm10_1 << 21)
+        | (imm11 << 20)
+        | (imm19_12 << 12)
+        | ((rd as u32) << 7)
+        | 0b110_1111;
+    word.to_le_bytes()
+}
+
+fn encode_jalr(rd: u8, rs1: u8, imm: i32) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b000 << 12)
+        | ((rd as u32) << 7)
+        | 0b110_0111;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -1022,5 +1046,61 @@ fn prove_lui_and_auipc() {
     program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1 (non-U-type)
     program.extend_from_slice(&encode_lui(1, 0xABCDE)); // x1 = 0xABCDE000
     program.extend_from_slice(&encode_auipc(2, 0x1)); // x2 = PC + 0x1000
+    prove(&program);
+}
+
+/// JAL: jump forward, verify rd = pc+4 and execution resumes at target.
+/// pc=0: jal x1, +8  → x1=4, jump to pc=8
+/// pc=4: addi x2, x0, 99  (skipped)
+/// pc=8: addi x3, x0, 42
+#[test]
+fn prove_jal_forward() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(1, 8)); // jal x1, 8
+    program.extend_from_slice(&encode_addi(2, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(3, 0, 42)); // executed
+    prove(&program);
+}
+
+/// JAL with rd=x0: unconditional jump, return address discarded.
+/// pc=0: jal x0, +8  → jump to pc=8, x0 stays 0
+/// pc=4: addi x1, x0, 99  (skipped)
+/// pc=8: addi x2, x0, 7
+#[test]
+fn prove_jal_rd_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(0, 8)); // jal x0, +8
+    program.extend_from_slice(&encode_addi(1, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // executed
+    prove(&program);
+}
+
+/// JALR: jump to rs1+imm, return address in rd.
+/// pc=0: addi x1, x0, 12  → x1=12
+/// pc=4: jalr x2, x1, 0   → x2=8, jump to 12
+/// pc=8: addi x3, x0, 99  (skipped)
+/// pc=12: addi x4, x0, 55
+#[test]
+fn prove_jalr_basic() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 12)); // x1 = 12
+    program.extend_from_slice(&encode_jalr(2, 1, 0)); // x2 = 8, jump to 12
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 55)); // executed
+    prove(&program);
+}
+
+/// JALR with non-zero immediate: jump to rs1+imm.
+/// pc=0: addi x1, x0, 8   → x1=8
+/// pc=4: jalr x2, x1, 4   → x2=8, jump to 12
+/// pc=8: addi x3, x0, 99  (skipped)
+/// pc=12: addi x4, x0, 42
+#[test]
+fn prove_jalr_with_imm() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
+    program.extend_from_slice(&encode_jalr(2, 1, 4)); // x2 = 8, jump to 12
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
     prove(&program);
 }

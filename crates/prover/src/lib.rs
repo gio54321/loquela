@@ -22,6 +22,8 @@ use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
 use loquela_air::instructions::andi::air::AndiAir;
 use loquela_air::instructions::auipc::air::AuipcAir;
+use loquela_air::instructions::jal::air::JalAir;
+use loquela_air::instructions::jalr::air::JalrAir;
 use loquela_air::instructions::lui::air::LuiAir;
 use loquela_air::instructions::or::air::OrInstrAir;
 use loquela_air::instructions::ori::air::OriAir;
@@ -125,6 +127,8 @@ pub enum LoquelAir {
     Sltiu(SltiuAir),
     Lui(LuiAir),
     Auipc(AuipcAir),
+    Jal(JalAir),
+    Jalr(JalrAir),
 }
 
 impl<F: Field> BaseAir<F> for LoquelAir {
@@ -166,6 +170,8 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Sltiu(a) => BaseAir::<F>::width(a),
             LoquelAir::Lui(a) => BaseAir::<F>::width(a),
             LoquelAir::Auipc(a) => BaseAir::<F>::width(a),
+            LoquelAir::Jal(a) => BaseAir::<F>::width(a),
+            LoquelAir::Jalr(a) => BaseAir::<F>::width(a),
         }
     }
 
@@ -230,6 +236,8 @@ where
             LoquelAir::Sltiu(a) => a.eval(builder),
             LoquelAir::Lui(a) => a.eval(builder),
             LoquelAir::Auipc(a) => a.eval(builder),
+            LoquelAir::Jal(a) => a.eval(builder),
+            LoquelAir::Jalr(a) => a.eval(builder),
         }
     }
 }
@@ -275,6 +283,8 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Lui(a) => <LuiAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Jal(a) => <JalAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Jalr(a) => <JalrAir as LookupAir<F>>::add_lookup_columns(a),
         }
     }
 
@@ -316,6 +326,8 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Lui(a) => <LuiAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Jal(a) => <JalAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Jalr(a) => <JalrAir as LookupAir<F>>::get_lookups(a),
         }
     }
 }
@@ -386,6 +398,10 @@ pub struct AllTraces {
     pub lui: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains AUIPC instructions.
     pub auipc: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains JAL instructions.
+    pub jal: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains JALR instructions.
+    pub jalr: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -429,6 +445,8 @@ impl AllTraces {
             sltiu,
             lui,
             auipc,
+            jal,
+            jalr,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -514,6 +532,12 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = auipc {
+            traces.push(t);
+        }
+        if let Some(t) = jal {
+            traces.push(t);
+        }
+        if let Some(t) = jalr {
             traces.push(t);
         }
         (airs, traces)
@@ -724,12 +748,19 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_auipc = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::Auipc { .. }));
+    let has_jal = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Jal { .. }));
+    let has_jalr = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Jalr { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
 
-    let final_step = steps.last().expect("no steps");
-    let final_pc_bytes = (final_step.state.pc + 4).to_le_bytes();
+    let _final_step = steps.last().expect("no steps");
+    // vm.pc is the PC after the last instruction executed — the next_pc sent on the trace bus.
+    let final_pc_bytes = vm.pc.to_le_bytes();
     let final_pc: [Val; 4] = final_pc_bytes.map(|b| Val::from_u64(b as u64));
     let final_ts = Val::from_u64(vm.timestamp as u64);
     let boundaries = loquela_air::boundaries::air::build_trace(final_pc, final_ts);
@@ -878,6 +909,20 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let auipc_trace = if has_auipc {
         Some(loquela_air::instructions::auipc::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let jal_trace = if has_jal {
+        Some(loquela_air::instructions::jal::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let jalr_trace = if has_jalr {
+        Some(loquela_air::instructions::jalr::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -1044,6 +1089,20 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
             {
                 // AUIPC: pc bytes and rd_val bytes are range-checked.
                 byte_checked_vals.push(s.state.pc);
+                byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Jal { .. }) =>
+            {
+                // JAL: pc bytes and rd_val (=pc+4) bytes are range-checked.
+                byte_checked_vals.push(s.state.pc);
+                byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Jalr { .. }) =>
+            {
+                // JALR: rs1_value bytes and rd_val (=pc+4) bytes are range-checked.
+                byte_checked_vals.push(*rs1);
                 byte_checked_vals.push(*rd);
             }
             _ => {}
@@ -1332,6 +1391,12 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_auipc {
         airs.push(LoquelAir::Auipc(AuipcAir::new()));
     }
+    if has_jal {
+        airs.push(LoquelAir::Jal(JalAir::new()));
+    }
+    if has_jalr {
+        airs.push(LoquelAir::Jalr(JalrAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -1371,6 +1436,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         sltiu: sltiu_trace,
         lui: lui_trace,
         auipc: auipc_trace,
+        jal: jal_trace,
+        jalr: jalr_trace,
     }
 }
 
