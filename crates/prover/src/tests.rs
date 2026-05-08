@@ -33,6 +33,15 @@ fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b100 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -225,6 +234,46 @@ fn prove_mixed_add_sub() {
     program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
     program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 27
     program.extend_from_slice(&encode_sub(4, 3, 2)); // x4 = 20
+    prove(&program);
+}
+
+/// Single XOR: x3 = x1 ^ x2. Exercises the register-register XOR path.
+#[test]
+fn prove_single_xor() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
+    program.extend_from_slice(&encode_addi(2, 0, 0b1100)); // x2 = 0b1100
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0b0110
+    prove(&program);
+}
+
+/// XOR of a register with itself produces zero: x ^ x == 0.
+#[test]
+fn prove_xor_self_is_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x7FF)); // x1 = 0x7FF
+    program.extend_from_slice(&encode_xor(2, 1, 1)); // x2 = x1 ^ x1 = 0
+    prove(&program);
+}
+
+/// XOR with all-ones (from XORI -1) produces bitwise complement.
+#[test]
+fn prove_xor_complement() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = ~42 = 0xFFFF_FFD5
+    prove(&program);
+}
+
+/// Mixed XOR and ADD: exercises both R-type instruction paths together.
+#[test]
+fn prove_mixed_xor_add() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+    program.extend_from_slice(&encode_addi(2, 0, 0x0F)); // x2 = 0x0F
+    program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0xF0
+    program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 0xF0 + 0xFF = 0x1EF
     prove(&program);
 }
 
