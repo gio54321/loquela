@@ -18,6 +18,12 @@ impl OrAir {
     }
 }
 
+impl Default for OrAir {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F: Field> BaseAir<F> for OrAir {
     fn width(&self) -> usize {
         1

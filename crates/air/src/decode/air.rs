@@ -31,6 +31,7 @@ pub enum InstructionId {
     Add = 4,
     Sub = 5,
     Xor = 6,
+    Or = 7,
 }
 
 #[repr(C)]
