@@ -1094,9 +1094,20 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
             [MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Auipc { .. }) =>
             {
-                // AUIPC: pc bytes and rd_val bytes are range-checked.
+                // AUIPC: pc bytes, imm_u bytes 1..3, and rd_val bytes are all
+                // range-checked by the AIR. imm_u[0] is constrained to 0 in eval
+                // and skipped here.
                 byte_checked_vals.push(s.state.pc);
                 byte_checked_vals.push(*rd);
+                let imm = match s.instruction {
+                    Instruction::Auipc { imm, .. } => imm as u32,
+                    _ => unreachable!(),
+                };
+                let imm_u = imm << 12;
+                let imm_u_bytes = imm_u.to_le_bytes();
+                byte_checked_singles.push(imm_u_bytes[1]);
+                byte_checked_singles.push(imm_u_bytes[2]);
+                byte_checked_singles.push(imm_u_bytes[3]);
             }
             [MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Jal { .. }) =>

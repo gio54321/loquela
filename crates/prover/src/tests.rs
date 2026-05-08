@@ -127,7 +127,13 @@ fn prove_and_verify(traces: AllTraces) -> bool {
     let config = build_config();
     let (proof, common) = do_prove(&config, &airs, &trace_vecs);
     let pvs = vec![vec![]; airs.len()];
-    verify_batch(&config, &airs, &proof, &pvs, &common).is_ok()
+    match verify_batch(&config, &airs, &proof, &pvs, &common) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("verify_batch error: {:?}", e);
+            false
+        }
+    }
 }
 
 fn prove_verify(program: &[u8]) {
@@ -164,6 +170,46 @@ fn debug_dump_sll_overflow() {
     program.extend_from_slice(&encode_sll(3, 1, 2));
     program.extend_from_slice(&encode_addi(4, 0, 1));
     program.extend_from_slice(&encode_sll(5, 3, 4));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_auipc_at_pc_zero() {
+    fn encode_auipc(rd: u8, imm: u32) -> [u8; 4] {
+        let word = ((imm & 0xFFFFF) << 12) | ((rd as u32) << 7) | 0b001_0111;
+        word.to_le_bytes()
+    }
+    let program = encode_auipc(1, 0x12345).to_vec();
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jal_rd_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(0, 8));
+    program.extend_from_slice(&encode_addi(1, 0, 99));
+    program.extend_from_slice(&encode_addi(2, 0, 7));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jalr_basic() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8));
+    program.extend_from_slice(&encode_jalr(2, 1, 0));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_sra_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -8i16));
+    program.extend_from_slice(&encode_addi(2, 0, 1));
+    program.extend_from_slice(&encode_sra(3, 1, 2));
     debug_dump(&program);
 }
 

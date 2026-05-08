@@ -807,15 +807,45 @@ impl<F: Field> LookupAir<F> for DecodeAir {
 
         // For JAL: export decoded instruction on the "decode_j" bus.
         // Schema: (instr_type_packed, rd, imm_high12, imm_lo8)
-        // imm_high12 = bits 31:20 of instruction = {imm[20], imm[10:1], imm[11]} = local.imm
-        // imm_lo8    = bits 19:12 of instruction = imm[19:12] = local.imm_low8
+        //
+        // imm_high12 here is the JAL AIR's reordering of the high-12 instruction
+        // bits, NOT the raw `local.imm` (which is bits 31:20 read as an integer).
+        // JAL's bit decomposition is laid out as:
+        //   bits[0..9]  = imm[1..10]   (instruction bits 21..30)
+        //   bit  [10]   = imm[11]      (instruction bit  20)
+        //   bit  [11]   = imm[20]      (instruction bit  31, sign)
+        // Build that integer here from the byte decompositions.
+        let imm_jal_form: SymbolicExpression<F> = {
+            let bit = |byte: usize, b: usize| -> SymbolicExpression<F> {
+                local.decompositions[byte][b].clone().into()
+            };
+            let p = |k: u32| -> SymbolicExpression<F> {
+                SymbolicExpression::from(F::from_u64(1u64 << k))
+            };
+            // imm[1..10] = instruction bits 21..30.
+            bit(2, 5) * p(0)
+                + bit(2, 6) * p(1)
+                + bit(2, 7) * p(2)
+                + bit(3, 0) * p(3)
+                + bit(3, 1) * p(4)
+                + bit(3, 2) * p(5)
+                + bit(3, 3) * p(6)
+                + bit(3, 4) * p(7)
+                + bit(3, 5) * p(8)
+                + bit(3, 6) * p(9)
+                // imm[11] = instruction bit 20.
+                + bit(2, 4) * p(10)
+                // imm[20] = instruction bit 31.
+                + bit(3, 7) * p(11)
+        };
+
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode_j")),
             &vec![(
                 vec![
                     local.instr_type_packed.into(),
                     local.rd.into(),
-                    local.imm.into(),
+                    imm_jal_form,
                     local.imm_low8.into(),
                 ],
                 (local.mult.clone() * is_jal).into(),
