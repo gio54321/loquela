@@ -20,11 +20,13 @@ use loquela_air::decode::air::DecodeAir;
 use loquela_air::instructions::add::air::AddAir;
 use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
+use loquela_air::instructions::sll::air::SllAir;
 use loquela_air::instructions::xori::air::XoriAir;
 use loquela_air::memory::air::MemoryAir;
 use loquela_air::primitives::and_lookup::AndAir;
 use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
 use loquela_air::primitives::byte_lookup::BytesAir;
+use loquela_air::primitives::byte_shift_left_lookup::ByteShiftLeftAir;
 use loquela_air::primitives::timestamp_less_than::TimestampLessThanAir;
 use loquela_air::primitives::u32_less_than_lookup::U32LessThanAir;
 use loquela_air::primitives::xor_lookup::XorAir;
@@ -75,11 +77,13 @@ pub enum LoquelAir {
     Addi(AddiAir),
     Xori(XoriAir),
     AndInstr(AndInstrAir),
+    Sll(SllAir),
     Memory(MemoryAir),
     Program(ProgramAir),
     Bytes(BytesAir),
     Xor(XorAir),
     And(AndAir),
+    ByteSll(ByteShiftLeftAir),
     U32Lt(U32LessThanAir),
     TimestampLt(TimestampLessThanAir),
     BytesLt(LessThanAir),
@@ -94,11 +98,13 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Addi(a) => BaseAir::<F>::width(a),
             LoquelAir::Xori(a) => BaseAir::<F>::width(a),
             LoquelAir::AndInstr(a) => BaseAir::<F>::width(a),
+            LoquelAir::Sll(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
             LoquelAir::Bytes(a) => BaseAir::<F>::width(a),
             LoquelAir::Xor(a) => BaseAir::<F>::width(a),
             LoquelAir::And(a) => BaseAir::<F>::width(a),
+            LoquelAir::ByteSll(a) => BaseAir::<F>::width(a),
             LoquelAir::U32Lt(a) => BaseAir::<F>::width(a),
             LoquelAir::TimestampLt(a) => BaseAir::<F>::width(a),
             LoquelAir::BytesLt(a) => BaseAir::<F>::width(a),
@@ -111,6 +117,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Bytes(a) => a.preprocessed_trace(),
             LoquelAir::Xor(a) => a.preprocessed_trace(),
             LoquelAir::And(a) => a.preprocessed_trace(),
+            LoquelAir::ByteSll(a) => a.preprocessed_trace(),
             LoquelAir::BytesLt(a) => a.preprocessed_trace(),
             _ => None,
         }
@@ -131,11 +138,13 @@ where
             LoquelAir::Addi(a) => a.eval(builder),
             LoquelAir::Xori(a) => a.eval(builder),
             LoquelAir::AndInstr(a) => a.eval(builder),
+            LoquelAir::Sll(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
             LoquelAir::Bytes(a) => a.eval(builder),
             LoquelAir::Xor(a) => a.eval(builder),
             LoquelAir::And(a) => a.eval(builder),
+            LoquelAir::ByteSll(a) => a.eval(builder),
             LoquelAir::U32Lt(a) => a.eval(builder),
             LoquelAir::TimestampLt(a) => a.eval(builder),
             LoquelAir::BytesLt(a) => a.eval(builder),
@@ -152,11 +161,13 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::AndInstr(a) => <AndInstrAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::U32Lt(a) => <U32LessThanAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::TimestampLt(a) => {
                 <TimestampLessThanAir as LookupAir<F>>::add_lookup_columns(a)
@@ -173,11 +184,13 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Addi(a) => <AddiAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Xori(a) => <XoriAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::AndInstr(a) => <AndInstrAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Xor(a) => <XorAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::U32Lt(a) => <U32LessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::TimestampLt(a) => <TimestampLessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::BytesLt(a) => <LessThanAir as LookupAir<F>>::get_lookups(a),
@@ -209,6 +222,10 @@ pub struct AllTraces {
     pub and_instr: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains AND instructions (bytes_and lookup table).
     pub and_prim: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLL instructions (instruction AIR).
+    pub sll: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLL instructions (byte_sll lookup table).
+    pub byte_sll: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -230,6 +247,8 @@ impl AllTraces {
             xori,
             and_instr,
             and_prim,
+            sll,
+            byte_sll,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -255,6 +274,12 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = and_prim {
+            traces.push(t);
+        }
+        if let Some(t) = sll {
+            traces.push(t);
+        }
+        if let Some(t) = byte_sll {
             traces.push(t);
         }
         (airs, traces)
@@ -405,6 +430,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_and = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::And { .. }));
+    let has_sll = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Sll { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -445,6 +473,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     } else {
         None
     };
+    let sll_trace = if has_sll {
+        Some(loquela_air::instructions::sll::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
 
     let memory = loquela_air::memory::trace::build_trace::<Val>(&all_ops);
 
@@ -457,8 +492,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
 
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new)
-    // and ADD (rs1, rs2, rd_new).
+    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new),
+    // ADD (rs1, rs2, rd_new), and SLL (rs2_value, rd_new; plus rs2_shamt_high scalar).
     let mut byte_checked_vals: Vec<u32> = Vec::new();
     for s in steps.iter() {
         match s.memory_ops.as_slice() {
@@ -474,6 +509,18 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rs1);
                 byte_checked_vals.push(*rs2);
                 byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Sll { .. }) =>
+            {
+                // SLL byte-range checks: rs2_value bytes, rd bytes.
+                // rs1 bytes are covered by the byte_sll lookup.
+                // rs2_shamt_high is a small value (0..7) also range-checked individually.
+                byte_checked_vals.push(*rs2);
+                byte_checked_vals.push(*rd);
+                // rs2_shamt_high: upper 3 bits of rs2 low byte
+                let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
+                byte_checked_vals.push(rs2_shamt_high);
             }
             _ => {}
         }
@@ -527,6 +574,33 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         None
     };
 
+    // Compute byte_sll multiplicities for SLL instructions.
+    // For each SLL step, we emit 4 lookups: (rs1_bytes[i], bit_shamt, shifted, carry).
+    // Row index in the byte_sll table = byte_val * 8 + bit_shamt.
+    let byte_sll_prim_trace = if has_sll {
+        let mut byte_sll_mults = vec![Val::ZERO; 256 * 8];
+        for s in steps.iter() {
+            if !matches!(s.instruction, Instruction::Sll { .. }) {
+                continue;
+            }
+            if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, ..] =
+                s.memory_ops.as_slice()
+            {
+                let shamt = rs2 & 0x1F;
+                let bit_shamt = (shamt % 8) as usize;
+                let rs1_b = rs1.to_le_bytes();
+                for i in 0..4 {
+                    let byte_val = rs1_b[i] as usize;
+                    let row = byte_val * 8 + bit_shamt;
+                    byte_sll_mults[row] += Val::ONE;
+                }
+            }
+        }
+        Some(loquela_air::primitives::byte_shift_left_lookup::build_trace::<Val>(&byte_sll_mults))
+    } else {
+        None
+    };
+
     let u32_lt = loquela_air::primitives::u32_less_than_lookup::build_trace::<Val>(&u32_lt_entries);
     let timestamp_lt =
         loquela_air::primitives::timestamp_less_than::build_trace::<Val>(&timestamp_lt_entries);
@@ -559,6 +633,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         airs.push(LoquelAir::AndInstr(AndInstrAir::new()));
         airs.push(LoquelAir::And(AndAir::new()));
     }
+    if has_sll {
+        airs.push(LoquelAir::Sll(SllAir::new()));
+        airs.push(LoquelAir::ByteSll(ByteShiftLeftAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -576,6 +654,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         xori: xori_trace,
         and_instr: and_instr_trace,
         and_prim: and_prim_trace,
+        sll: sll_trace,
+        byte_sll: byte_sll_prim_trace,
     }
 }
 
