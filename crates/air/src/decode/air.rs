@@ -29,6 +29,8 @@ pub struct Instruction<F> {
     pub is_sltiu: F,
     pub is_lui: F,
     pub is_auipc: F,
+    pub is_jal: F,
+    pub is_jalr: F,
 }
 
 #[repr(u8)]
@@ -49,6 +51,8 @@ pub enum InstructionId {
     Sltiu = 13,
     Lui = 14,
     Auipc = 15,
+    Jal = 16,
+    Jalr = 17,
 }
 
 #[repr(C)]
@@ -144,6 +148,8 @@ where
         builder.assert_bool(local.instr_type.is_sltiu.clone());
         builder.assert_bool(local.instr_type.is_lui.clone());
         builder.assert_bool(local.instr_type.is_auipc.clone());
+        builder.assert_bool(local.instr_type.is_jal.clone());
+        builder.assert_bool(local.instr_type.is_jalr.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
@@ -160,7 +166,9 @@ where
                 + local.instr_type.is_slti.clone()
                 + local.instr_type.is_sltiu.clone()
                 + local.instr_type.is_lui.clone()
-                + local.instr_type.is_auipc.clone(),
+                + local.instr_type.is_auipc.clone()
+                + local.instr_type.is_jal.clone()
+                + local.instr_type.is_jalr.clone(),
             AB::Expr::ONE,
         );
 
@@ -420,6 +428,32 @@ where
             when_sltiu.assert_eq(local.decompositions[1][4 + i].clone(), expected);
         }
 
+        // JAL: opcode == 0b1101111 (J-type).
+        let mut when_jal = builder.when(local.instr_type.is_jal.clone());
+        for i in 0..7 {
+            let expected = if (0b1101111u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_jal.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+
+        // JALR: opcode == 0b1100111, funct3 == 0b000.
+        let mut when_jalr = builder.when(local.instr_type.is_jalr.clone());
+        for i in 0..7 {
+            let expected = if (0b1100111u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_jalr.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+        let mut when_jalr = builder.when(local.instr_type.is_jalr.clone());
+        for i in 0..3 {
+            when_jalr.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
+        }
+
         // LUI: opcode == 0b0110111.
         let mut when_lui = builder.when(local.instr_type.is_lui.clone());
         for i in 0..7 {
@@ -457,14 +491,19 @@ where
                 (2, 3),
             ],
         );
-        // For U-type instructions, imm_low8 == the 8-bit immediate fragment.
-        let mut when_u_type =
-            builder.when(local.instr_type.is_lui.clone() + local.instr_type.is_auipc.clone());
-        when_u_type.assert_eq(local.imm_low8.clone(), imm_low8_expr);
-        // For non-U-type instructions, imm_low8 == 0.
-        let is_not_u_type: AB::Expr =
-            AB::Expr::ONE - local.instr_type.is_lui.clone() - local.instr_type.is_auipc.clone();
-        builder.assert_eq(local.imm_low8.clone() * is_not_u_type, AB::Expr::ZERO);
+        // For U-type and JAL instructions, imm_low8 == the 8-bit immediate fragment (bits 19:12).
+        let mut when_u_or_jal = builder.when(
+            local.instr_type.is_lui.clone()
+                + local.instr_type.is_auipc.clone()
+                + local.instr_type.is_jal.clone(),
+        );
+        when_u_or_jal.assert_eq(local.imm_low8.clone(), imm_low8_expr);
+        // For all other instructions, imm_low8 == 0.
+        let is_not_u_or_jal: AB::Expr = AB::Expr::ONE
+            - local.instr_type.is_lui.clone()
+            - local.instr_type.is_auipc.clone()
+            - local.instr_type.is_jal.clone();
+        builder.assert_eq(local.imm_low8.clone() * is_not_u_or_jal, AB::Expr::ZERO);
 
         // rd = bits 7..12 (1 bit in byte 0, 4 bits in byte 1).
         let rd_expr = pack_bits::<AB, 4>(
@@ -511,7 +550,7 @@ where
 
         // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=AND, 4=SLL, 5=SRL, 6=SRA,
         //                    7=SLLI, 8=SRLI, 9=SRAI, 10=SLT, 11=SLTU, 12=SLTI, 13=SLTIU,
-        //                    14=LUI, 15=AUIPC.
+        //                    14=LUI, 15=AUIPC, 16=JAL, 17=JALR.
         let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
             + local.instr_type.is_xori.clone() * AB::Expr::ONE
             + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(2))
@@ -527,7 +566,9 @@ where
             + local.instr_type.is_slti.clone() * AB::Expr::from(AB::F::from_u32(12))
             + local.instr_type.is_sltiu.clone() * AB::Expr::from(AB::F::from_u32(13))
             + local.instr_type.is_lui.clone() * AB::Expr::from(AB::F::from_u32(14))
-            + local.instr_type.is_auipc.clone() * AB::Expr::from(AB::F::from_u32(15));
+            + local.instr_type.is_auipc.clone() * AB::Expr::from(AB::F::from_u32(15))
+            + local.instr_type.is_jal.clone() * AB::Expr::from(AB::F::from_u32(16))
+            + local.instr_type.is_jalr.clone() * AB::Expr::from(AB::F::from_u32(17));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -567,14 +608,16 @@ impl<F: Field> LookupAir<F> for DecodeAir {
             ));
         }
 
-        // For the decode bus field4: use imm for standard I-type (ADDI/XORI/SLTI/SLTIU),
+        // For the decode bus field4: use imm for standard I-type (ADDI/XORI/SLTI/SLTIU/JALR),
         // rs2 (= imm[4:0] = shamt) for shift-immediate instructions (SLLI/SRLI/SRAI),
         // rs2 for R-type instructions (ADD/AND/SLL/SRL/SRA/SLT/SLTU),
         // and imm (= bits 31:20) for U-type (LUI/AUIPC).
+        // JAL uses the "decode_j" bus instead.
         let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
             + SymbolicExpression::from(local.instr_type.is_xori)
             + SymbolicExpression::from(local.instr_type.is_slti)
-            + SymbolicExpression::from(local.instr_type.is_sltiu);
+            + SymbolicExpression::from(local.instr_type.is_sltiu)
+            + SymbolicExpression::from(local.instr_type.is_jalr);
         // shift-immediate: send rs2 (= shamt = imm[4:0]) as field4.
         let is_shift_imm: SymbolicExpression<F> =
             SymbolicExpression::from(local.instr_type.is_slli)
@@ -590,14 +633,16 @@ impl<F: Field> LookupAir<F> for DecodeAir {
         // U-type: send imm (bits 31:20) as field4; imm_low8 is on the "decode_u" bus.
         let is_u_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_lui)
             + SymbolicExpression::from(local.instr_type.is_auipc);
+        // JAL: handled on the "decode_j" bus.
+        let is_jal: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_jal);
         let field4: SymbolicExpression<F> = is_i_type * SymbolicExpression::from(local.imm)
             + (is_r_type + is_shift_imm) * SymbolicExpression::from(local.rs2)
             + is_u_type.clone() * SymbolicExpression::from(local.imm);
 
-        // Export the decoded instruction for non-U-type (all existing instruction types).
-        // U-type (LUI/AUIPC) rows are handled via the "decode_u" bus instead.
-        let is_not_u_type: SymbolicExpression<F> =
-            SymbolicExpression::from(F::ONE) - is_u_type.clone();
+        // Export the decoded instruction for non-U-type, non-JAL instructions.
+        // U-type (LUI/AUIPC) rows use "decode_u" bus; JAL rows use "decode_j" bus.
+        let is_standard: SymbolicExpression<F> =
+            SymbolicExpression::from(F::ONE) - is_u_type.clone() - is_jal.clone();
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
@@ -607,14 +652,13 @@ impl<F: Field> LookupAir<F> for DecodeAir {
                     local.rs1.into(),
                     field4,
                 ],
-                (local.mult.clone() * is_not_u_type).into(),
+                (local.mult.clone() * is_standard).into(),
                 Direction::Receive,
             )],
         ));
 
         // For U-type (LUI/AUIPC): export decoded instruction on the "decode_u" bus.
         // Schema: (instr_type_packed, rd, imm_high12, imm_low8)
-        // This allows the LUI/AUIPC instruction AIRs to receive full imm_raw info.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode_u")),
             &vec![(
@@ -625,6 +669,24 @@ impl<F: Field> LookupAir<F> for DecodeAir {
                     local.imm_low8.into(),
                 ],
                 (local.mult.clone() * is_u_type).into(),
+                Direction::Receive,
+            )],
+        ));
+
+        // For JAL: export decoded instruction on the "decode_j" bus.
+        // Schema: (instr_type_packed, rd, imm_high12, imm_lo8)
+        // imm_high12 = bits 31:20 of instruction = {imm[20], imm[10:1], imm[11]} = local.imm
+        // imm_lo8    = bits 19:12 of instruction = imm[19:12] = local.imm_low8
+        lookups.push(self.register_lookup(
+            Kind::Global(String::from("decode_j")),
+            &vec![(
+                vec![
+                    local.instr_type_packed.into(),
+                    local.rd.into(),
+                    local.imm.into(),
+                    local.imm_low8.into(),
+                ],
+                (local.mult.clone() * is_jal).into(),
                 Direction::Receive,
             )],
         ));
