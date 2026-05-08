@@ -1,4 +1,4 @@
-use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
+use super::air::{DecodeColumns, Instruction, InstructionId, NUM_DECODE_COLS};
 use loquela_vm::ExecutionStep;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -36,8 +36,16 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
 
     let is_addi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b000;
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
+    let is_ori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b110;
+    let is_andi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b111;
     let is_add =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
+    let is_sub =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b010_0000;
+    let is_xor =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b100 && (word >> 25) == 0b000_0000;
+    let is_or =
+        word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b110 && (word >> 25) == 0b000_0000;
     let is_and =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b111 && (word >> 25) == 0b000_0000;
     let is_sll =
@@ -56,7 +64,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
+        is_ori: F::from_bool(is_ori),
+        is_andi: F::from_bool(is_andi),
         is_add: F::from_bool(is_add),
+        is_sub: F::from_bool(is_sub),
+        is_xor: F::from_bool(is_xor),
+        is_or: F::from_bool(is_or),
         is_and: F::from_bool(is_and),
         is_sll: F::from_bool(is_sll),
         is_srl: F::from_bool(is_srl),
@@ -66,25 +79,35 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_srai: F::from_bool(is_srai),
     };
     row.instr_type_packed = if is_xori {
-        F::ONE
+        F::from_u64(InstructionId::Xori as u64)
+    } else if is_ori {
+        F::from_u64(InstructionId::Ori as u64)
+    } else if is_andi {
+        F::from_u64(InstructionId::Andi as u64)
     } else if is_add {
-        F::from_u64(2)
+        F::from_u64(InstructionId::Add as u64)
+    } else if is_sub {
+        F::from_u64(InstructionId::Sub as u64)
+    } else if is_xor {
+        F::from_u64(InstructionId::Xor as u64)
+    } else if is_or {
+        F::from_u64(InstructionId::Or as u64)
     } else if is_and {
-        F::from_u64(3)
+        F::from_u64(InstructionId::And as u64)
     } else if is_sll {
-        F::from_u64(4)
+        F::from_u64(InstructionId::Sll as u64)
     } else if is_srl {
-        F::from_u64(5)
+        F::from_u64(InstructionId::Srl as u64)
     } else if is_sra {
-        F::from_u64(6)
+        F::from_u64(InstructionId::Sra as u64)
     } else if is_slli {
-        F::from_u64(7)
+        F::from_u64(InstructionId::Slli as u64)
     } else if is_srli {
-        F::from_u64(8)
+        F::from_u64(InstructionId::Srli as u64)
     } else if is_srai {
-        F::from_u64(9)
+        F::from_u64(InstructionId::Srai as u64)
     } else {
-        F::ZERO
+        F::from_u64(InstructionId::Addi as u64)
     };
     row.mult = F::ONE;
 }

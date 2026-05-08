@@ -2,9 +2,9 @@ use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
 
-use super::air::{AddiColumns, NUM_ADDI_COLS};
+use super::air::{AndiColumns, NUM_ANDI_COLS};
 
-struct AddiStep {
+struct AndiStep {
     pc: u32,
     timestamp: u32,
     rd: u8,
@@ -16,13 +16,13 @@ struct AddiStep {
     rd_new_value: u32,
 }
 
-/// Collect all ADDI execution steps from the VM trace.
-fn extract_addi_steps(steps: &[ExecutionStep]) -> Vec<AddiStep> {
+/// Collect all ANDI execution steps from the VM trace.
+fn extract_andi_steps(steps: &[ExecutionStep]) -> Vec<AndiStep> {
     steps
         .iter()
         .filter_map(|step| {
             let (rd, rs1, imm) = match step.instruction {
-                Instruction::AddI { rd, rs1, imm } => (rd, rs1, imm),
+                Instruction::AndiI { rd, rs1, imm } => (rd, rs1, imm),
                 _ => return None,
             };
             let (timestamp, rs1_value, old_rd_value, rd_new_value) =
@@ -36,7 +36,7 @@ fn extract_addi_steps(steps: &[ExecutionStep]) -> Vec<AddiStep> {
                     }] => (*timestamp, *value, *old_value, *new_value),
                     _ => return None,
                 };
-            Some(AddiStep {
+            Some(AndiStep {
                 pc: step.state.pc,
                 timestamp,
                 rd,
@@ -73,22 +73,7 @@ fn pc_plus4_carries(pc: u32) -> [u8; 3] {
     [c0, c1, c2]
 }
 
-/// Carry bits produced when computing `x + y` byte by byte (matching `u32_add`).
-/// Returns `[carry_out_byte0, carry_out_byte1, carry_out_byte2, carry_out_byte3]`.
-fn u32_add_carries(x: u32, y: u32) -> [u8; 4] {
-    let xb = x.to_le_bytes();
-    let yb = y.to_le_bytes();
-    let mut carries = [0u8; 4];
-    let mut carry = 0u32;
-    for i in 0..4 {
-        let sum = xb[i] as u32 + yb[i] as u32 + carry;
-        carries[i] = (sum >> 8) as u8;
-        carry = carries[i] as u32;
-    }
-    carries
-}
-
-fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>, step: &AddiStep) {
+fn fill_row<F: PrimeCharacteristicRing>(row: &mut AndiColumns<F>, step: &AndiStep) {
     row.pc = u32_to_limbs(step.pc);
     row.timestamp = F::from_u64(step.timestamp as u64);
     row.rd = F::from_u64(step.rd as u64);
@@ -115,14 +100,6 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>, step: &AddiSte
     row.old_rd_value = u32_to_limbs(step.old_rd_value);
     row.rd_new_value = u32_to_limbs(step.rd_new_value);
 
-    let carries = u32_add_carries(step.rs1_value, imm_se);
-    row.add_carries = [
-        F::from_u64(carries[0] as u64),
-        F::from_u64(carries[1] as u64),
-        F::from_u64(carries[2] as u64),
-        F::from_u64(carries[3] as u64),
-    ];
-
     row.is_dummy = F::ONE;
 
     row.next_pc = u32_to_limbs(step.pc + 4);
@@ -136,9 +113,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>, step: &AddiSte
 
 /// Fill a padding row that satisfies all `eval` constraints when all semantic
 /// values are zero. `u32_plus_four(0, 4, [0,0,0])` holds since `4 + 0·256 = 0 + 4`.
-/// `u32_add(0, 0, 0, [0,0,0,0])` holds trivially.
-fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>) {
-    *row = AddiColumns {
+fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AndiColumns<F>) {
+    *row = AndiColumns {
         pc: [F::ZERO; 4],
         timestamp: F::ZERO,
         rd: F::ZERO,
@@ -149,36 +125,35 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AddiColumns<F>) {
         rs1_value: [F::ZERO; 4],
         old_rd_value: [F::ZERO; 4],
         rd_new_value: [F::ZERO; 4],
-        add_carries: [F::ZERO; 4],
         next_pc: [F::from_u64(4), F::ZERO, F::ZERO, F::ZERO],
         next_pc_carries: [F::ZERO; 3],
         is_dummy: F::ZERO,
     };
 }
 
-/// Build the ADDI execution trace from the VM execution steps.
+/// Build the ANDI execution trace from the VM execution steps.
 ///
-/// Filters all ADDI steps, fills one row per step, and pads to the next power of two.
+/// Filters all ANDI steps, fills one row per step, and pads to the next power of two.
 pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     steps: &[ExecutionStep],
 ) -> DenseMatrix<F> {
-    let addi_steps = extract_addi_steps(steps);
-    assert!(!addi_steps.is_empty(), "no ADDI steps found in trace");
+    let andi_steps = extract_andi_steps(steps);
+    assert!(!andi_steps.is_empty(), "no ANDI steps found in trace");
 
-    let num_rows = addi_steps.len().next_power_of_two().max(4);
-    let mut values = vec![F::ZERO; num_rows * NUM_ADDI_COLS];
+    let num_rows = andi_steps.len().next_power_of_two().max(4);
+    let mut values = vec![F::ZERO; num_rows * NUM_ANDI_COLS];
 
-    let (prefix, rows, suffix) = unsafe { values.align_to_mut::<AddiColumns<F>>() };
+    let (prefix, rows, suffix) = unsafe { values.align_to_mut::<AndiColumns<F>>() };
     assert!(prefix.is_empty(), "alignment mismatch");
     assert!(suffix.is_empty(), "alignment mismatch");
     assert_eq!(rows.len(), num_rows);
 
-    for (row, step) in rows.iter_mut().zip(addi_steps.iter()) {
+    for (row, step) in rows.iter_mut().zip(andi_steps.iter()) {
         fill_row(row, step);
     }
-    for row in rows.iter_mut().skip(addi_steps.len()) {
+    for row in rows.iter_mut().skip(andi_steps.len()) {
         fill_padding_row(row);
     }
 
-    DenseMatrix::new(values, NUM_ADDI_COLS)
+    DenseMatrix::new(values, NUM_ANDI_COLS)
 }

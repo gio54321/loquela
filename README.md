@@ -26,20 +26,20 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] SLTI
 - [ ] SLTIU
 - [X] XORI
-- [ ] ORI
-- [ ] ANDI
+- [X] ORI
+- [X] ANDI
 - [X] SLLI
 - [X] SRLI
 - [X] SRAI
 - [X] ADD
-- [ ] SUB
+- [X] SUB
 - [X] SLL
 - [ ] SLT
 - [ ] SLTU
-- [ ] XOR
+- [X] XOR
 - [X] SRL
 - [X] SRA
-- [ ] OR
+- [X] OR
 - [X] AND
 - [ ] ECALL
 - [ ] EBREAK
