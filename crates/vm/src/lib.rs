@@ -10,6 +10,9 @@ pub enum MemoryType {
 pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
+    SlliI { rd: u8, rs1: u8, imm: i32 },
+    SrliI { rd: u8, rs1: u8, imm: i32 },
+    SraiI { rd: u8, rs1: u8, imm: i32 },
     Add { rd: u8, rs1: u8, rs2: u8 },
     And { rd: u8, rs1: u8, rs2: u8 },
     Sll { rd: u8, rs1: u8, rs2: u8 },
@@ -128,6 +131,78 @@ impl VM {
                 let rs1_val = registers[*rs1 as usize];
                 let old_rd = registers[*rd as usize];
                 let result = rs1_val ^ (*imm as u32);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::SlliI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let shamt = (*imm & 0x1F) as u32;
+                let result = rs1_val.wrapping_shl(shamt);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::SrliI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let shamt = (*imm & 0x1F) as u32;
+                let result = rs1_val.wrapping_shr(shamt);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::SraiI { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let shamt = (*imm & 0x1F) as u32;
+                let result = ((rs1_val as i32) >> shamt) as u32;
 
                 ops.push(MemoryOperation::Read {
                     memory_type: MemoryType::Register,
@@ -341,6 +416,30 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = ((bytes as i32) >> 20) as i16;
             Instruction::XorI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011
+            && (bytes >> 12) & 0b111 == 0b001
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes >> 20) & 0x1F) as i32;
+            Instruction::SlliI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011
+            && (bytes >> 12) & 0b111 == 0b101
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes >> 20) & 0x1F) as i32;
+            Instruction::SrliI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0010011
+            && (bytes >> 12) & 0b111 == 0b101
+            && (bytes >> 25) == 0b0100000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = ((bytes >> 20) & 0x1F) as i32;
+            Instruction::SraiI { rd, rs1, imm }
         } else if bytes & 0b1111111 == 0b0110011
             && (bytes >> 12) & 0b111 == 0b000
             && (bytes >> 25) == 0b0000000
