@@ -333,7 +333,7 @@ impl<F: Field> LookupAir<F> for SrliAir {
         lookups.extend(local.rd_bytes.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

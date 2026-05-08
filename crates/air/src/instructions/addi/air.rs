@@ -247,7 +247,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
         lookups.extend(local.rs1_value.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -255,7 +255,7 @@ impl<F: Field> LookupAir<F> for AddiAir {
         lookups.extend(local.rd_new_value.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

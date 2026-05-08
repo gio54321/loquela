@@ -273,7 +273,7 @@ impl<F: Field> LookupAir<F> for SltiuAir {
         lookups.extend(local.rs1_bytes.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -281,7 +281,7 @@ impl<F: Field> LookupAir<F> for SltiuAir {
         lookups.extend(local.diff_bytes.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

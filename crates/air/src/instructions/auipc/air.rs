@@ -222,7 +222,7 @@ impl<F: Field> LookupAir<F> for AuipcAir {
         lookups.extend(local.pc.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -233,7 +233,7 @@ impl<F: Field> LookupAir<F> for AuipcAir {
         lookups.extend(local.imm_u[1..].iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![(*byte).into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![(*byte).into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -241,7 +241,7 @@ impl<F: Field> LookupAir<F> for AuipcAir {
         lookups.extend(local.rd_val.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
