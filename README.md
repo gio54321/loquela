@@ -8,12 +8,12 @@ Yet Another RISCV zkvm on top of plonky3
 - [X] AUIPC
 - [X] JAL
 - [X] JALR
-- [ ] BEQ
-- [ ] BNE
-- [ ] BLT
-- [ ] BGE
-- [ ] BLTU
-- [ ] BGEU
+- [X] BEQ
+- [X] BNE
+- [X] BLT
+- [X] BGE
+- [X] BLTU
+- [X] BGEU
 - [ ] LB
 - [ ] LH
 - [ ] LW
