@@ -14,6 +14,8 @@ pub enum Instruction {
     Sw { rs1: u8, rs2: u8, imm: i32 },
     Sh { rs1: u8, rs2: u8, imm: i32 },
     Sb { rs1: u8, rs2: u8, imm: i32 },
+    Ecall,
+    Ebreak,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +63,7 @@ pub struct VM {
     pub pc: u32,
     pub timestamp: u32,
     pub trace: Vec<ExecutionStep>,
+    pub halted: bool,
 }
 
 impl VM {
@@ -71,11 +74,12 @@ impl VM {
             pc: 0,
             timestamp: 0,
             trace: Vec::new(),
+            halted: false,
         }
     }
 
     pub fn run(&mut self) -> Result<(), String> {
-        while (self.pc as usize) < self.program.len() {
+        while (self.pc as usize) < self.program.len() && !self.halted {
             self.step()?;
         }
         Ok(())
@@ -272,6 +276,10 @@ impl VM {
 
                 self.memory.insert(addr, stored_val);
             }
+            Instruction::Ecall | Instruction::Ebreak => {
+                // Halt the VM — no register reads or writes.
+                self.halted = true;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -331,6 +339,14 @@ impl VM {
                 0b001 => Instruction::Sh { rs1, rs2, imm },
                 0b000 => Instruction::Sb { rs1, rs2, imm },
                 _ => unimplemented!("unsupported S-type funct3"),
+            }
+        } else if bytes & 0b1111111 == 0b1110011 && (bytes >> 12) & 0b111 == 0b000 {
+            // SYSTEM (opcode=0x73, funct3=0x0): ECALL (imm=0) or EBREAK (imm=1).
+            let imm = (bytes >> 20) & 0xFFF;
+            match imm {
+                0 => Instruction::Ecall,
+                1 => Instruction::Ebreak,
+                _ => unimplemented!("unsupported SYSTEM immediate"),
             }
         } else {
             unimplemented!("not supported");
