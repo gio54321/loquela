@@ -21,6 +21,12 @@ use loquela_air::instructions::add::air::AddAir;
 use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
 use loquela_air::instructions::auipc::air::AuipcAir;
+use loquela_air::instructions::beq::air::BeqAir;
+use loquela_air::instructions::bge::air::BgeAir;
+use loquela_air::instructions::bgeu::air::BgeuAir;
+use loquela_air::instructions::blt::air::BltAir;
+use loquela_air::instructions::bltu::air::BltuAir;
+use loquela_air::instructions::bne::air::BneAir;
 use loquela_air::instructions::jal::air::JalAir;
 use loquela_air::instructions::jalr::air::JalrAir;
 use loquela_air::instructions::lui::air::LuiAir;
@@ -115,6 +121,12 @@ pub enum LoquelAir {
     Auipc(AuipcAir),
     Jal(JalAir),
     Jalr(JalrAir),
+    Beq(BeqAir),
+    Bne(BneAir),
+    Blt(BltAir),
+    Bge(BgeAir),
+    Bltu(BltuAir),
+    Bgeu(BgeuAir),
 }
 
 impl<F: Field> BaseAir<F> for LoquelAir {
@@ -150,6 +162,12 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Auipc(a) => BaseAir::<F>::width(a),
             LoquelAir::Jal(a) => BaseAir::<F>::width(a),
             LoquelAir::Jalr(a) => BaseAir::<F>::width(a),
+            LoquelAir::Beq(a) => BaseAir::<F>::width(a),
+            LoquelAir::Bne(a) => BaseAir::<F>::width(a),
+            LoquelAir::Blt(a) => BaseAir::<F>::width(a),
+            LoquelAir::Bge(a) => BaseAir::<F>::width(a),
+            LoquelAir::Bltu(a) => BaseAir::<F>::width(a),
+            LoquelAir::Bgeu(a) => BaseAir::<F>::width(a),
         }
     }
 
@@ -205,6 +223,12 @@ where
             LoquelAir::Auipc(a) => a.eval(builder),
             LoquelAir::Jal(a) => a.eval(builder),
             LoquelAir::Jalr(a) => a.eval(builder),
+            LoquelAir::Beq(a) => a.eval(builder),
+            LoquelAir::Bne(a) => a.eval(builder),
+            LoquelAir::Blt(a) => a.eval(builder),
+            LoquelAir::Bge(a) => a.eval(builder),
+            LoquelAir::Bltu(a) => a.eval(builder),
+            LoquelAir::Bgeu(a) => a.eval(builder),
         }
     }
 }
@@ -244,6 +268,12 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Jal(a) => <JalAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Jalr(a) => <JalrAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Beq(a) => <BeqAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Bne(a) => <BneAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Blt(a) => <BltAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Bge(a) => <BgeAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Bltu(a) => <BltuAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Bgeu(a) => <BgeuAir as LookupAir<F>>::add_lookup_columns(a),
         }
     }
 
@@ -279,6 +309,12 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Jal(a) => <JalAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Jalr(a) => <JalrAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Beq(a) => <BeqAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Bne(a) => <BneAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Blt(a) => <BltAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Bge(a) => <BgeAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Bltu(a) => <BltuAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Bgeu(a) => <BgeuAir as LookupAir<F>>::get_lookups(a),
         }
     }
 }
@@ -339,6 +375,18 @@ pub struct AllTraces {
     pub jal: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains JALR instructions.
     pub jalr: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BEQ instructions.
+    pub beq: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BNE instructions.
+    pub bne: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BLT instructions.
+    pub blt: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BGE instructions.
+    pub bge: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BLTU instructions.
+    pub bltu: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains BGEU instructions.
+    pub bgeu: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -376,6 +424,12 @@ impl AllTraces {
             auipc,
             jal,
             jalr,
+            beq,
+            bne,
+            blt,
+            bge,
+            bltu,
+            bgeu,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -449,6 +503,24 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = jalr {
+            traces.push(t);
+        }
+        if let Some(t) = beq {
+            traces.push(t);
+        }
+        if let Some(t) = bne {
+            traces.push(t);
+        }
+        if let Some(t) = blt {
+            traces.push(t);
+        }
+        if let Some(t) = bge {
+            traces.push(t);
+        }
+        if let Some(t) = bltu {
+            traces.push(t);
+        }
+        if let Some(t) = bgeu {
             traces.push(t);
         }
         (airs, traces)
@@ -641,6 +713,24 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_jalr = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::Jalr { .. }));
+    let has_beq = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Beq { .. }));
+    let has_bne = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Bne { .. }));
+    let has_blt = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Blt { .. }));
+    let has_bge = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Bge { .. }));
+    let has_bltu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Bltu { .. }));
+    let has_bgeu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Bgeu { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -775,6 +865,48 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let jalr_trace = if has_jalr {
         Some(loquela_air::instructions::jalr::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let beq_trace = if has_beq {
+        Some(loquela_air::instructions::beq::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let bne_trace = if has_bne {
+        Some(loquela_air::instructions::bne::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let blt_trace = if has_blt {
+        Some(loquela_air::instructions::blt::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let bge_trace = if has_bge {
+        Some(loquela_air::instructions::bge::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let bltu_trace = if has_bltu {
+        Some(loquela_air::instructions::bltu::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let bgeu_trace = if has_bgeu {
+        Some(loquela_air::instructions::bgeu::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -949,6 +1081,46 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 // JALR: rs1_value bytes and rd_val (=pc+4) bytes are range-checked.
                 byte_checked_vals.push(*rs1);
                 byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }]
+                if matches!(
+                    s.instruction,
+                    Instruction::Beq { .. } | Instruction::Bne { .. }
+                ) =>
+            {
+                // BEQ/BNE: rs1_bytes, rs2_bytes, diff_bytes are range-checked.
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                let diff = rs1.wrapping_sub(*rs2);
+                byte_checked_vals.push(diff);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }]
+                if matches!(
+                    s.instruction,
+                    Instruction::Bltu { .. } | Instruction::Bgeu { .. }
+                ) =>
+            {
+                // BLTU/BGEU: rs1_bytes, rs2_bytes, diff_bytes are range-checked.
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                let diff = rs1.wrapping_sub(*rs2);
+                byte_checked_vals.push(diff);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }]
+                if matches!(
+                    s.instruction,
+                    Instruction::Blt { .. } | Instruction::Bge { .. }
+                ) =>
+            {
+                // BLT/BGE: rs1_bytes, rs2_bytes, diff_bytes, rs1_byte3_low7, rs2_byte3_low7 range-checked.
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                let diff = rs1.wrapping_sub(*rs2);
+                byte_checked_vals.push(diff);
+                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
+                byte_checked_vals.push(rs1_byte3_low7);
+                let rs2_byte3_low7 = (rs2 >> 24) & 0x7F;
+                byte_checked_vals.push(rs2_byte3_low7);
             }
             _ => {}
         }
@@ -1160,6 +1332,24 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_jalr {
         airs.push(LoquelAir::Jalr(JalrAir::new()));
     }
+    if has_beq {
+        airs.push(LoquelAir::Beq(BeqAir::new()));
+    }
+    if has_bne {
+        airs.push(LoquelAir::Bne(BneAir::new()));
+    }
+    if has_blt {
+        airs.push(LoquelAir::Blt(BltAir::new()));
+    }
+    if has_bge {
+        airs.push(LoquelAir::Bge(BgeAir::new()));
+    }
+    if has_bltu {
+        airs.push(LoquelAir::Bltu(BltuAir::new()));
+    }
+    if has_bgeu {
+        airs.push(LoquelAir::Bgeu(BgeuAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -1193,6 +1383,12 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         auipc: auipc_trace,
         jal: jal_trace,
         jalr: jalr_trace,
+        beq: beq_trace,
+        bne: bne_trace,
+        blt: blt_trace,
+        bge: bge_trace,
+        bltu: bltu_trace,
+        bgeu: bgeu_trace,
     }
 }
 
