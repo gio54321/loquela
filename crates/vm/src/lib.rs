@@ -24,6 +24,8 @@ pub enum Instruction {
     SltiuI { rd: u8, rs1: u8, imm: i32 },
     Lui { rd: u8, imm: i32 },
     Auipc { rd: u8, imm: i32 },
+    Jal { rd: u8, imm: i32 },
+    Jalr { rd: u8, rs1: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -533,6 +535,72 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Jal { rd, imm } => {
+                let old_rd = registers[*rd as usize];
+                let return_addr = if *rd == 0 { 0 } else { pc.wrapping_add(4) };
+                let next_pc = pc.wrapping_add(*imm as u32);
+
+                // Write return address to rd (or 0 if rd=x0).
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: return_addr,
+                });
+                self.timestamp += 1;
+
+                if *rd != 0 {
+                    registers[*rd as usize] = return_addr;
+                }
+
+                self.trace.push(ExecutionStep {
+                    state: VMState { pc, registers },
+                    instruction_word,
+                    instruction,
+                    memory_ops: ops,
+                });
+                self.pc = next_pc;
+                return Ok(());
+            }
+            Instruction::Jalr { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let return_addr = if *rd == 0 { 0 } else { pc.wrapping_add(4) };
+                let next_pc = rs1_val.wrapping_add(*imm as u32) & !1u32;
+
+                // Read rs1.
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+
+                // Write return address to rd (or 0 if rd=x0).
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: return_addr,
+                });
+                self.timestamp += 1;
+
+                if *rd != 0 {
+                    registers[*rd as usize] = return_addr;
+                }
+
+                self.trace.push(ExecutionStep {
+                    state: VMState { pc, registers },
+                    instruction_word,
+                    instruction,
+                    memory_ops: ops,
+                });
+                self.pc = next_pc;
+                return Ok(());
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -671,6 +739,29 @@ impl VM {
             // imm is the raw upper-20 bits (bits 31:12), NOT yet shifted
             let imm = ((bytes as i32) >> 12) & 0xF_FFFF;
             Instruction::Auipc { rd, imm }
+        } else if bytes & 0b1111111 == 0b1101111 {
+            // JAL: J-type, opcode=0x6F
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            // J-type immediate: bits scrambled across the instruction word.
+            // imm[20]   = bit 31
+            // imm[10:1] = bits 30:21
+            // imm[11]   = bit 20
+            // imm[19:12]= bits 19:12
+            // imm[0]    = 0 (always)
+            let imm20 = (bytes >> 31) & 1;
+            let imm10_1 = (bytes >> 21) & 0x3FF;
+            let imm11 = (bytes >> 20) & 1;
+            let imm19_12 = (bytes >> 12) & 0xFF;
+            let imm_raw = (imm20 << 20) | (imm19_12 << 12) | (imm11 << 11) | (imm10_1 << 1);
+            // Sign-extend from bit 20.
+            let imm = ((imm_raw << 11) as i32) >> 11;
+            Instruction::Jal { rd, imm }
+        } else if bytes & 0b1111111 == 0b1100111 && (bytes >> 12) & 0b111 == 0b000 {
+            // JALR: I-type, opcode=0x67, funct3=0x0
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Jalr { rd, rs1, imm }
         } else {
             unimplemented!("not supported");
         }
@@ -923,6 +1014,97 @@ mod tests {
 
         let regs = vm.trace.last().unwrap().state.registers;
         assert_eq!(regs[3], 0);
+    }
+
+    fn encode_jal(rd: u8, imm: i32) -> [u8; 4] {
+        // J-type encoding:
+        // imm[20|10:1|11|19:12] | rd | opcode
+        let imm = imm as u32;
+        let imm20 = (imm >> 20) & 1;
+        let imm10_1 = (imm >> 1) & 0x3FF;
+        let imm11 = (imm >> 11) & 1;
+        let imm19_12 = (imm >> 12) & 0xFF;
+        let word = (imm20 << 31)
+            | (imm10_1 << 21)
+            | (imm11 << 20)
+            | (imm19_12 << 12)
+            | ((rd as u32) << 7)
+            | 0b110_1111;
+        word.to_le_bytes()
+    }
+
+    fn encode_jalr(rd: u8, rs1: u8, imm: i32) -> [u8; 4] {
+        let word = ((imm as u32 & 0xFFF) << 20)
+            | ((rs1 as u32) << 15)
+            | (0b000 << 12)
+            | ((rd as u32) << 7)
+            | 0b110_0111;
+        word.to_le_bytes()
+    }
+
+    #[test]
+    fn jal_jumps_forward() {
+        // Program:
+        //   pc=0: jal x1, +8  → x1 = 4, jump to pc=8
+        //   pc=4: addi x2, x0, 99  (should be skipped)
+        //   pc=8: addi x3, x0, 42
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_jal(1, 8)); // jal x1, 8
+        program.extend_from_slice(&encode_addi(2, 0, 99)); // should be skipped
+        program.extend_from_slice(&encode_addi(3, 0, 42));
+
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[1], 4, "x1 should be return address pc+4=4");
+        assert_eq!(regs[2], 0, "x2 should not be set (skipped)");
+        assert_eq!(regs[3], 42, "x3 should be 42");
+        assert_eq!(
+            vm.trace.len(),
+            2,
+            "should execute jal + addi, skipping middle"
+        );
+    }
+
+    #[test]
+    fn jal_rd_zero_unconditional_jump() {
+        // jal x0, +8 — unconditional jump, return address discarded (rd=x0 → 0)
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_jal(0, 8)); // jal x0, 8
+        program.extend_from_slice(&encode_addi(1, 0, 99)); // skipped
+        program.extend_from_slice(&encode_addi(2, 0, 7));
+
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        // x0 is hardwired to 0 — the write emits new_value=0
+        assert_eq!(regs[0], 0, "x0 hardwired to 0");
+        assert_eq!(regs[1], 0, "x1 should not be set (skipped)");
+        assert_eq!(regs[2], 7, "x2 should be 7");
+    }
+
+    #[test]
+    fn jalr_jumps_to_register_plus_imm() {
+        // addi x1, x0, 12  → x1 = 12
+        // jalr x2, x1, 0   → x2 = pc+4, jump to x1+0=12
+        // addi x3, x0, 99  (at pc=8, should be skipped)
+        // addi x4, x0, 55  (at pc=12, target)
+        let mut program = Vec::new();
+        program.extend_from_slice(&encode_addi(1, 0, 12)); // pc=0: x1=12
+        program.extend_from_slice(&encode_jalr(2, 1, 0)); // pc=4: x2=8, jump to 12
+        program.extend_from_slice(&encode_addi(3, 0, 99)); // pc=8: skipped
+        program.extend_from_slice(&encode_addi(4, 0, 55)); // pc=12: target
+
+        let mut vm = VM::new(program);
+        vm.run().unwrap();
+
+        let regs = vm.trace.last().unwrap().state.registers;
+        assert_eq!(regs[1], 12, "x1 = 12");
+        assert_eq!(regs[2], 8, "x2 = return address = 4+4=8");
+        assert_eq!(regs[3], 0, "x3 skipped");
+        assert_eq!(regs[4], 55, "x4 = 55 (target)");
     }
 
     fn print_regs(regs: &[u32; 32]) {
