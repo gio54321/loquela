@@ -14,11 +14,11 @@ Yet Another RISCV zkvm on top of plonky3
 - [X] BGE
 - [X] BLTU
 - [X] BGEU
-- [ ] LB
-- [ ] LH
-- [ ] LW
-- [ ] LBU
-- [ ] LHU
+- [X] LB
+- [X] LH
+- [X] LW
+- [X] LBU
+- [X] LHU
 - [ ] SB
 - [ ] SH
 - [ ] SW
