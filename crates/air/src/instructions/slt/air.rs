@@ -320,7 +320,7 @@ impl<F: Field> LookupAir<F> for SltAir {
             Kind::Global(String::from("bytes")),
             &vec![(
                 vec![local.rs1_byte3_low7.into()],
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));
@@ -330,7 +330,7 @@ impl<F: Field> LookupAir<F> for SltAir {
             Kind::Global(String::from("bytes")),
             &vec![(
                 vec![local.rs2_byte3_low7.into()],
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));

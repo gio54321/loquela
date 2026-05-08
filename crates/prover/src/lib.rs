@@ -943,9 +943,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
 
     let (u32_lt_entries, timestamp_lt_entries, bytes_lt_mults) = memory_lookup_entries(&all_ops);
 
-    // Collect all u32 values that are byte-range-checked by ADDI (rs1, rd_new),
-    // ADD/SUB (rs1, rs2, rd_new), SLL/SRL (rs2_value, rd_new; plus rs2_shamt_high scalar).
+    // Collect all u32 values that are byte-range-checked (each is expanded to
+    // 4 byte multiplicities) and all single-byte values that get range-checked
+    // individually (e.g. rs2_shamt_high, rs1_byte3_low7). Mixing them was the
+    // source of a subtle bug: pushing a single-byte value as u32 would incorrectly
+    // bump multiplicities[0] by 3 for the three high zero bytes.
     let mut byte_checked_vals: Vec<u32> = Vec::new();
+    let mut byte_checked_singles: Vec<u8> = Vec::new();
     for s in steps.iter() {
         match s.memory_ops.as_slice() {
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
@@ -979,8 +983,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 // rs2_shamt_high is a small value (0..7) also range-checked individually.
                 byte_checked_vals.push(*rs2);
                 byte_checked_vals.push(*rd);
-                let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
-                byte_checked_vals.push(rs2_shamt_high);
+                let rs2_shamt_high = ((*rs2 & 0xFF) >> 5) as u8;
+                byte_checked_singles.push(rs2_shamt_high);
             }
             [MemoryOperation::Read { value: _rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Srl { .. }) =>
@@ -990,8 +994,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 // rs2_shamt_high is a small value (0..7) also range-checked individually.
                 byte_checked_vals.push(*rs2);
                 byte_checked_vals.push(*rd);
-                let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
-                byte_checked_vals.push(rs2_shamt_high);
+                let rs2_shamt_high = ((*rs2 & 0xFF) >> 5) as u8;
+                byte_checked_singles.push(rs2_shamt_high);
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Sra { .. }) =>
@@ -1002,11 +1006,11 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rs2);
                 byte_checked_vals.push(*rd);
                 // rs2_shamt_high: upper 3 bits of rs2 low byte
-                let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
-                byte_checked_vals.push(rs2_shamt_high);
+                let rs2_shamt_high = ((*rs2 & 0xFF) >> 5) as u8;
+                byte_checked_singles.push(rs2_shamt_high);
                 // rs1_byte3_low7: low 7 bits of rs1's high byte
-                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
-                byte_checked_vals.push(rs1_byte3_low7);
+                let rs1_byte3_low7 = ((rs1 >> 24) & 0x7F) as u8;
+                byte_checked_singles.push(rs1_byte3_low7);
             }
             [MemoryOperation::Read { .. }, MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::SlliI { .. }) =>
@@ -1026,8 +1030,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 // SRAI: rd bytes and rs1_byte3_low7 are range-checked;
                 // rs1 bytes covered by byte_srl lookup.
                 byte_checked_vals.push(*rd);
-                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
-                byte_checked_vals.push(rs1_byte3_low7);
+                let rs1_byte3_low7 = ((rs1 >> 24) & 0x7F) as u8;
+                byte_checked_singles.push(rs1_byte3_low7);
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Sltu { .. }) =>
@@ -1047,10 +1051,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rs2);
                 let diff = rs1.wrapping_sub(*rs2);
                 byte_checked_vals.push(diff);
-                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
-                byte_checked_vals.push(rs1_byte3_low7);
-                let rs2_byte3_low7 = (rs2 >> 24) & 0x7F;
-                byte_checked_vals.push(rs2_byte3_low7);
+                let rs1_byte3_low7 = ((rs1 >> 24) & 0x7F) as u8;
+                byte_checked_singles.push(rs1_byte3_low7);
+                let rs2_byte3_low7 = ((rs2 >> 24) & 0x7F) as u8;
+                byte_checked_singles.push(rs2_byte3_low7);
                 let _ = rd;
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
@@ -1077,8 +1081,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rs1);
                 let diff = rs1.wrapping_sub(imm);
                 byte_checked_vals.push(diff);
-                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
-                byte_checked_vals.push(rs1_byte3_low7);
+                let rs1_byte3_low7 = ((rs1 >> 24) & 0x7F) as u8;
+                byte_checked_singles.push(rs1_byte3_low7);
                 let _ = rd;
             }
             [MemoryOperation::Write { new_value: rd, .. }]
@@ -1111,7 +1115,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
             _ => {}
         }
     }
-    let bytes_mults = bytes_multiplicities(&byte_checked_vals);
+    let mut bytes_mults = bytes_multiplicities(&byte_checked_vals);
+    for &b in &byte_checked_singles {
+        bytes_mults[b as usize] += Val::ONE;
+    }
     let bytes = loquela_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();

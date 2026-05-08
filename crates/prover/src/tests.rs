@@ -155,6 +155,28 @@ fn debug_dump_single_addi() {
     debug_dump(&program);
 }
 
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_sll_overflow() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1));
+    program.extend_from_slice(&encode_addi(2, 0, 31));
+    program.extend_from_slice(&encode_sll(3, 1, 2));
+    program.extend_from_slice(&encode_addi(4, 0, 1));
+    program.extend_from_slice(&encode_sll(5, 3, 4));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jal_forward() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(1, 8));
+    program.extend_from_slice(&encode_addi(2, 0, 99));
+    program.extend_from_slice(&encode_addi(3, 0, 7));
+    debug_dump(&program);
+}
+
 // ── Positive tests ────────────────────────────────────────────────────────────
 
 /// Single ADDI: x1 = x0 + 1.  Exercises the bytes and trace buses.
