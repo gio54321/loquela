@@ -23,8 +23,8 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] SH
 - [ ] SW
 - [X] ADDI
-- [ ] SLTI
-- [ ] SLTIU
+- [X] SLTI
+- [X] SLTIU
 - [X] XORI
 - [ ] ORI
 - [ ] ANDI
@@ -34,8 +34,8 @@ Yet Another RISCV zkvm on top of plonky3
 - [X] ADD
 - [ ] SUB
 - [X] SLL
-- [ ] SLT
-- [ ] SLTU
+- [X] SLT
+- [X] SLTU
 - [ ] XOR
 - [X] SRL
 - [X] SRA
