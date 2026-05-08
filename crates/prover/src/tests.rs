@@ -32,6 +32,15 @@ fn encode_and(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_sll(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b001 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -169,6 +178,51 @@ fn prove_mixed_addi_and() {
     program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0xFF & 0xAA = 0xAA
     program.extend_from_slice(&encode_addi(4, 0, 0x55)); // x4 = 0x55
     program.extend_from_slice(&encode_and(5, 3, 4)); // x5 = 0xAA & 0x55 = 0x00
+    prove(&program);
+}
+
+/// Single SLL: x3 = x1 << x2 (basic left shift: 1 << 3 = 8).
+#[test]
+fn prove_single_sll() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 3 = 8
+    prove(&program);
+}
+
+/// SLL by zero: result equals the input.
+#[test]
+fn prove_sll_by_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+                                                       // x2 = 0 (already zero), so SLL by 0 is identity
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 42 << 0 = 42
+    prove(&program);
+}
+
+/// SLL overflow: 0x80000000 << 1 = 0 (wrapping u32).
+#[test]
+fn prove_sll_overflow() {
+    let mut program = Vec::new();
+    // Build x1 = 0x80000000 via addi x1, x0, -1 = 0xFFFF_FFFF then
+    // we can't directly load 0x80000000 with ADDI, so shift a known value.
+    // Use addi x1, x0, 1 = 1, then SLL by 31 = 0x80000000, then SLL by 1 = 0.
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 31)); // x2 = 31
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 31 = 0x80000000
+    program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
+    program.extend_from_slice(&encode_sll(5, 3, 4)); // x5 = 0x80000000 << 1 = 0
+    prove(&program);
+}
+
+/// SLL with shamt >= 8 (byte_shamt > 0): shifts across byte boundaries.
+#[test]
+fn prove_sll_cross_byte() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (byte_shamt=1, bit_shamt=0)
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 8 = 256 = 0x100
     prove(&program);
 }
 
