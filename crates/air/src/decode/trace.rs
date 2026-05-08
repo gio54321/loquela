@@ -1,4 +1,4 @@
-use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
+use super::air::{DecodeColumns, Instruction, InstructionId, NUM_DECODE_COLS};
 use loquela_vm::ExecutionStep;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -57,23 +57,22 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_xor: F::from_bool(is_xor),
         is_or: F::from_bool(is_or),
     };
-    // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ANDI, 4=ADD, 5=SUB, 6=XOR.
     row.instr_type_packed = if is_xori {
-        F::ONE
+        F::from_u64(InstructionId::Xori as u64)
     } else if is_ori {
-        F::from_u64(2)
+        F::from_u64(InstructionId::Ori as u64)
     } else if is_andi {
-        F::from_u64(3)
+        F::from_u64(InstructionId::Andi as u64)
     } else if is_add {
-        F::from_u64(4)
+        F::from_u64(InstructionId::Add as u64)
     } else if is_sub {
-        F::from_u64(5)
+        F::from_u64(InstructionId::Sub as u64)
     } else if is_xor {
-        F::from_u64(6)
+        F::from_u64(InstructionId::Xor as u64)
     } else if is_or {
-        F::from_u64(7)
+        F::from_u64(InstructionId::Or as u64)
     } else {
-        F::ZERO
+        F::from_u64(InstructionId::Addi as u64)
     };
     row.mult = F::ONE;
 }

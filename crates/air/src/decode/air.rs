@@ -313,15 +313,22 @@ where
         );
         builder.assert_eq(local.rs2.clone(), rs2_expr);
 
-        // instr_type_packed: 0=ADDI, 1=XORI, 2=ORI, 3=ANDI, 4=ADD, 5=SUB, 6=XOR, 7=OR.
-        let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
-            + local.instr_type.is_xori.clone() * AB::Expr::ONE
-            + local.instr_type.is_ori.clone() * AB::Expr::from(AB::F::from_u32(2))
-            + local.instr_type.is_andi.clone() * AB::Expr::from(AB::F::from_u32(3))
-            + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(4))
-            + local.instr_type.is_sub.clone() * AB::Expr::from(AB::F::from_u32(5))
-            + local.instr_type.is_xor.clone() * AB::Expr::from(AB::F::from_u32(6))
-            + local.instr_type.is_or.clone() * AB::Expr::from(AB::F::from_u32(7));
+        let packed = local.instr_type.is_addi.clone()
+            * AB::Expr::from(AB::F::from_u64(InstructionId::Addi as u64))
+            + local.instr_type.is_xori.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Xori as u64))
+            + local.instr_type.is_ori.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Ori as u64))
+            + local.instr_type.is_andi.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Andi as u64))
+            + local.instr_type.is_add.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Add as u64))
+            + local.instr_type.is_sub.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Sub as u64))
+            + local.instr_type.is_xor.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Xor as u64))
+            + local.instr_type.is_or.clone()
+                * AB::Expr::from(AB::F::from_u64(InstructionId::Or as u64));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
