@@ -241,11 +241,12 @@ impl<F: Field> LookupAir<F> for JalrAir {
             )],
         ));
 
-        // Assert the decoded instruction is JALR with (rd, rs1, imm) from "decode" bus.
+        // Assert the decoded instruction is JALR with (pc, rd, rs1, imm) from "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                once(F::from_u64(InstructionId::Jalr as u64).into())
+                local.pc.into_iter().map(Into::into)
+                    .chain(once(F::from_u64(InstructionId::Jalr as u64).into()))
                     .chain([local.rd, local.rs1, local.imm].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),
@@ -289,7 +290,7 @@ impl<F: Field> LookupAir<F> for JalrAir {
         lookups.extend(local.rs1_value.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -297,7 +298,7 @@ impl<F: Field> LookupAir<F> for JalrAir {
         lookups.extend(local.rd_val.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

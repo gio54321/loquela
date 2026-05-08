@@ -274,11 +274,12 @@ impl<F: Field> LookupAir<F> for SrlAir {
             )],
         ));
 
-        // Assert the decoded instruction is SRL with (rd, rs1, rs2) from the "decode" bus.
+        // Assert the decoded instruction is SRL with (pc, rd, rs1, rs2) from the "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                once(F::from_u64(InstructionId::Srl as u64).into())
+                local.pc.into_iter().map(Into::into)
+                    .chain(once(F::from_u64(InstructionId::Srl as u64).into()))
                     .chain([local.rd, local.rs1, local.rs2].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),
@@ -366,7 +367,7 @@ impl<F: Field> LookupAir<F> for SrlAir {
         lookups.extend(local.rs2_value.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 
@@ -375,7 +376,7 @@ impl<F: Field> LookupAir<F> for SrlAir {
             Kind::Global(String::from("bytes")),
             &vec![(
                 vec![local.rs2_shamt_high.into()],
-                F::ONE.into(),
+                local.is_dummy.into(),
                 Direction::Send,
             )],
         ));
@@ -384,7 +385,7 @@ impl<F: Field> LookupAir<F> for SrlAir {
         lookups.extend(local.rd_bytes.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

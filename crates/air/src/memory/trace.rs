@@ -60,7 +60,7 @@ fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
 /// They are converted, sorted by `(memory_type, address, timestamp)`, and
 /// written into the matrix.  Transition equality flags are derived
 /// automatically from consecutive sorted rows.
-pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
+pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync + Eq>(
     vm_ops: &[MemoryOperation],
 ) -> DenseMatrix<F> {
     let mut ops: Vec<MemoryOp> = vm_ops.iter().map(MemoryOp::from).collect();
@@ -85,17 +85,23 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
         row.timestamp = F::from_u64(op.timestamp as u64);
         row.read = u32_to_limbs(op.read);
         row.write = u32_to_limbs(op.write);
-
-        if let Some(next) = ops.get(i + 1) {
-            row.is_memory_type_equal = F::from_bool(op.memory_type as u8 == next.memory_type as u8);
-            row.is_address_equal = F::from_bool(op.address == next.address);
-            row.is_timestamp_equal = F::from_bool(op.timestamp == next.timestamp);
-        }
-        // Last real row and padding rows keep F::ZERO for all equality flags and is_padding.
     }
 
     for row in rows[num_ops..].iter_mut() {
         row.is_padding = F::ONE;
+    }
+
+    // Compute equality flags between every adjacent pair of rows, including
+    // real→padding and padding→padding transitions, so the AIR's "when not
+    // equal" constraints match what the rows actually contain. The last row's
+    // flags don't matter (when_transition() gates them out).
+    for i in 0..num_rows.saturating_sub(1) {
+        let (left, right) = rows.split_at_mut(i + 1);
+        let local = &mut left[i];
+        let next = &right[0];
+        local.is_memory_type_equal = F::from_bool(local.memory_type == next.memory_type);
+        local.is_address_equal = F::from_bool(local.address == next.address);
+        local.is_timestamp_equal = F::from_bool(local.timestamp == next.timestamp);
     }
 
     DenseMatrix::new(values, NUM_COLS)

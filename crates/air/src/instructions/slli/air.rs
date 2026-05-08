@@ -261,11 +261,12 @@ impl<F: Field> LookupAir<F> for SlliAir {
             )],
         ));
 
-        // Assert the decoded instruction is SLLI with (rd, rs1, imm) from the "decode" bus.
+        // Assert the decoded instruction is SLLI with (pc, rd, rs1, imm) from the "decode" bus.
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                once(F::from_u64(InstructionId::Slli as u64).into())
+                local.pc.into_iter().map(Into::into)
+                    .chain(once(F::from_u64(InstructionId::Slli as u64).into()))
                     .chain([local.rd, local.rs1, local.imm].into_iter().map(Into::into))
                     .collect(),
                 local.is_dummy.into(),
@@ -337,7 +338,7 @@ impl<F: Field> LookupAir<F> for SlliAir {
         lookups.extend(local.rd_bytes.into_iter().map(|byte| {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
-                &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+                &vec![(vec![byte.into()], local.is_dummy.into(), Direction::Send)],
             )
         }));
 

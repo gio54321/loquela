@@ -85,9 +85,23 @@ impl<F: Field> BaseAir<F> for BoundariesAir {
 impl<AB: AirBuilder> Air<AB> for BoundariesAir
 where
     AB::MainWindow: WindowAccess<AB::Var>,
+    AB::PreprocessedWindow: WindowAccess<AB::Var>,
     <AB as AirBuilder>::F: Field,
 {
-    fn eval(&self, _builder: &mut AB) {}
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local: &BoundaryColumns<AB::Var> = main.current_slice().borrow();
+        let prep = builder.preprocessed();
+        // Preprocessed columns: [is_first, is_last]. Row 0 is the only row
+        // where is_first = 1; on that row the witnessed pc and timestamp must
+        // be zero so that the constant (0, 0) tuple sent on the "trace" bus is
+        // actually pinned to the witnessed initial state.
+        let is_first = prep.current_slice()[0].clone();
+        for i in 0..4 {
+            builder.assert_zero(is_first.clone() * local.pc[i].clone());
+        }
+        builder.assert_zero(is_first * local.timestamp.clone());
+    }
 }
 
 impl<F: Field> LookupAir<F> for BoundariesAir {

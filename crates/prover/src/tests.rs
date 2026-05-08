@@ -1,7 +1,7 @@
 use p3_batch_stark::verify_batch;
 use p3_field::PrimeCharacteristicRing;
 
-use crate::{build_config, do_prove, generate_traces, prove, prove_traces, AllTraces, Val};
+use crate::{build_config, debug, do_prove, generate_traces, AllTraces, Val};
 
 fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     let word =
@@ -130,20 +130,116 @@ fn prove_and_verify(traces: AllTraces) -> bool {
     verify_batch(&config, &airs, &proof, &pvs, &common).is_ok()
 }
 
+fn prove_verify(program: &[u8]) {
+    assert!(
+        prove_and_verify(generate_traces(program)),
+        "proof verification failed"
+    );
+}
+
+/// Dump every AIR's main + preprocessed trace and every lookup tuple
+/// (per row, with non-zero multiplicity), then run `check_lookups` to
+/// surface any global-bus imbalance with location info.
+#[allow(dead_code)]
+fn debug_dump(program: &[u8]) {
+    let traces = generate_traces(program);
+    let (mut airs, trace_vecs) = traces.into_vecs();
+    debug::dump_traces_and_lookups(&mut airs, &trace_vecs);
+    debug::check_all_lookups(&mut airs, &trace_vecs);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_single_addi() {
+    let program = encode_addi(1, 0, 1).to_vec();
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_sll_overflow() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1));
+    program.extend_from_slice(&encode_addi(2, 0, 31));
+    program.extend_from_slice(&encode_sll(3, 1, 2));
+    program.extend_from_slice(&encode_addi(4, 0, 1));
+    program.extend_from_slice(&encode_sll(5, 3, 4));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_auipc_at_pc_zero() {
+    fn encode_auipc(rd: u8, imm: u32) -> [u8; 4] {
+        let word = ((imm & 0xFFFFF) << 12) | ((rd as u32) << 7) | 0b001_0111;
+        word.to_le_bytes()
+    }
+    let program = encode_auipc(1, 0x12345).to_vec();
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jal_rd_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(0, 8));
+    program.extend_from_slice(&encode_addi(1, 0, 99));
+    program.extend_from_slice(&encode_addi(2, 0, 7));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jalr_basic() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8));
+    program.extend_from_slice(&encode_jalr(2, 1, 0));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_srai_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -8i16));
+    program.extend_from_slice(&encode_srai(2, 1, 1));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_sra_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -8i16));
+    program.extend_from_slice(&encode_addi(2, 0, 1));
+    program.extend_from_slice(&encode_sra(3, 1, 2));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_jal_forward() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_jal(1, 8));
+    program.extend_from_slice(&encode_addi(2, 0, 99));
+    program.extend_from_slice(&encode_addi(3, 0, 7));
+    debug_dump(&program);
+}
+
 // ── Positive tests ────────────────────────────────────────────────────────────
 
 /// Single ADDI: x1 = x0 + 1.  Exercises the bytes and trace buses.
 #[test]
 fn prove_single_addi() {
     let program = encode_addi(1, 0, 1).to_vec();
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single XORI: x1 = x0 ^ 0xFF.  Exercises the bytes_xor bus.
 #[test]
 fn prove_single_xori() {
     let program = encode_xori(1, 0, 0xFF).to_vec();
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single ADD: x3 = x1 + x2. Exercises the register-register addition path.
@@ -153,7 +249,7 @@ fn prove_single_add() {
     program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
     program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
     program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 17
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// ADD wrapping overflow: 0xFFFF_FFFF + 1 = 0.
@@ -163,7 +259,7 @@ fn prove_add_wrapping() {
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
     program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 0 (wraps)
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + ADD program exercising both I-type and R-type paths together.
@@ -175,7 +271,7 @@ fn prove_mixed_addi_add() {
     program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 8
     program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 13
     program.extend_from_slice(&encode_addi(5, 4, -1)); // x5 = 12
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Multiple ADDI steps touching different registers; exercises the u32_lt
@@ -187,7 +283,7 @@ fn prove_addi_chain() {
     program.extend_from_slice(&encode_addi(2, 1, 3)); // x2 = 8
     program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
     program.extend_from_slice(&encode_addi(3, 2, -1)); // x3 = 7
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + XORI program, identical to the guest test.s fixture.
@@ -199,7 +295,7 @@ fn prove_mixed_addi_xori() {
     program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1
     program.extend_from_slice(&encode_xori(4, 3, -1i16)); // x4 = x3 ^ 0xFFFF_FFFF
     program.extend_from_slice(&encode_xori(5, 2, 0x55)); // x5 = x2 ^ 0x55
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Overwriting the same register twice; checks that the memory AIR handles
@@ -210,15 +306,17 @@ fn prove_overwrite_register() {
     program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
     program.extend_from_slice(&encode_addi(1, 0, 20)); // x1 = 20
     program.extend_from_slice(&encode_addi(1, 1, 5)); // x1 = 25
-    prove(&program);
+    prove_verify(&program);
 }
 
-/// Confirm that generate_traces + prove_traces round-trips correctly.
+/// Confirm that generate_traces + prove_and_verify round-trips correctly.
 #[test]
 fn generate_then_prove() {
     let program = encode_addi(1, 0, 42).to_vec();
-    let traces = generate_traces(&program);
-    prove_traces(traces);
+    assert!(
+        prove_and_verify(generate_traces(&program)),
+        "proof verification failed"
+    );
 }
 
 /// Single AND: x3 = x1 & x2. Exercises the bytes_and bus.
@@ -228,7 +326,7 @@ fn prove_single_and() {
     program.extend_from_slice(&encode_addi(1, 0, 0x5A)); // x1 = 0x5A
     program.extend_from_slice(&encode_addi(2, 0, 0x3F)); // x2 = 0x3F
     program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0x5A & 0x3F = 0x1A
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// AND with a masking pattern: extract low nibbles of each byte using 0x0F0F0F0F.
@@ -245,7 +343,7 @@ fn prove_and_nibble_mask() {
                                                      // Mask x1 again with all-bits mask (ADDI -1 = 0xFFFF_FFFF)
     program.extend_from_slice(&encode_addi(4, 0, -1i16)); // x4 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_and(5, 1, 4)); // x5 = 0x12 & 0xFFFF_FFFF = 0x12
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + AND program verifying end-to-end with multiple AND steps.
@@ -257,7 +355,7 @@ fn prove_mixed_addi_and() {
     program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0xFF & 0xAA = 0xAA
     program.extend_from_slice(&encode_addi(4, 0, 0x55)); // x4 = 0x55
     program.extend_from_slice(&encode_and(5, 3, 4)); // x5 = 0xAA & 0x55 = 0x00
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single SLL: x3 = x1 << x2 (basic left shift: 1 << 3 = 8).
@@ -267,7 +365,7 @@ fn prove_single_sll() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 3 = 8
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLL by zero: result equals the input.
@@ -277,7 +375,7 @@ fn prove_sll_by_zero() {
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
                                                        // x2 = 0 (already zero), so SLL by 0 is identity
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 42 << 0 = 42
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLL overflow: 0x80000000 << 1 = 0 (wrapping u32).
@@ -292,7 +390,7 @@ fn prove_sll_overflow() {
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 31 = 0x80000000
     program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
     program.extend_from_slice(&encode_sll(5, 3, 4)); // x5 = 0x80000000 << 1 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLL with shamt >= 8 (byte_shamt > 0): shifts across byte boundaries.
@@ -302,7 +400,7 @@ fn prove_sll_cross_byte() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (byte_shamt=1, bit_shamt=0)
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 8 = 256 = 0x100
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single SRL: x3 = x1 >> x2 (basic right shift: 8 >> 3 = 1).
@@ -312,7 +410,7 @@ fn prove_single_srl() {
     program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
     program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
     program.extend_from_slice(&encode_srl(3, 1, 2)); // x3 = 8 >> 3 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRL by zero: result equals the input (identity).
@@ -322,7 +420,7 @@ fn prove_srl_by_zero() {
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
                                                        // x2 = 0 (already zero), so SRL by 0 is identity
     program.extend_from_slice(&encode_srl(3, 1, 2)); // x3 = 42 >> 0 = 42
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRL of 0x80000000 >> 1 = 0x40000000 (logical, not arithmetic — high bit not propagated).
@@ -336,7 +434,7 @@ fn prove_srl_logical_not_arithmetic() {
                                                      // Now shift right by 1 — logical: result is 0x40000000, not 0xC0000000.
     program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
     program.extend_from_slice(&encode_srl(5, 3, 4)); // x5 = 0x80000000 >> 1 = 0x40000000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRL crossing a byte boundary (shamt=8: byte_shamt=1, bit_shamt=0).
@@ -348,7 +446,7 @@ fn prove_srl_cross_byte() {
     program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (shift left 8 to get 0x100)
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 0x100
     program.extend_from_slice(&encode_srl(4, 3, 2)); // x4 = 0x100 >> 8 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 fn encode_sra(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
@@ -399,7 +497,7 @@ fn prove_sra_positive() {
     program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
     program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
     program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = 8 >> 3 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRA on a negative number: -8 >> 1 = -4 (0xFFFFFFF8 >> 1 = 0xFFFFFFFC).
@@ -411,7 +509,7 @@ fn prove_sra_negative() {
     program.extend_from_slice(&encode_addi(1, 0, -8i16)); // x1 = 0xFFFFFFF8
     program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
     program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = -8 >> 1 = -4 = 0xFFFFFFFC
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRA by 0: result equals the input (identity).
@@ -421,7 +519,7 @@ fn prove_sra_by_zero() {
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
                                                        // x2 = 0 (already zero), so SRA by 0 is identity
     program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = 42 >> 0 = 42
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRA of 0x80000000 >> 1 = 0xC0000000 (arithmetic, sign bit propagates).
@@ -435,7 +533,7 @@ fn prove_sra_sign_extension() {
                                                      // Now shift right arithmetically by 1 — result is 0xC0000000 (sign extends).
     program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
     program.extend_from_slice(&encode_sra(5, 3, 4)); // x5 = 0x80000000 >> 1 = 0xC0000000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single SLLI: x2 = x1 << 3 (1 << 3 = 8).
@@ -444,7 +542,7 @@ fn prove_single_slli() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_slli(2, 1, 3)); // x2 = 1 << 3 = 8
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLLI by zero: result equals the input (identity).
@@ -453,7 +551,7 @@ fn prove_slli_by_zero() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
     program.extend_from_slice(&encode_slli(2, 1, 0)); // x2 = 42 << 0 = 42
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLLI overflow: 0x80000000 << 1 = 0 (wrapping u32).
@@ -464,7 +562,7 @@ fn prove_slli_overflow() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 1 << 31 = 0x80000000
     program.extend_from_slice(&encode_slli(3, 2, 1)); // x3 = 0x80000000 << 1 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single SRLI: x2 = x1 >> 3 (8 >> 3 = 1).
@@ -473,7 +571,7 @@ fn prove_single_srli() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
     program.extend_from_slice(&encode_srli(2, 1, 3)); // x2 = 8 >> 3 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRLI of 0x80000000 >> 1 = 0x40000000 (logical, not arithmetic — high bit not propagated).
@@ -484,7 +582,7 @@ fn prove_srli_logical_not_arithmetic() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 0x80000000
     program.extend_from_slice(&encode_srli(3, 2, 1)); // x3 = 0x80000000 >> 1 = 0x40000000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRLI crossing byte boundary (shamt=8): 0x100 >> 8 = 1.
@@ -494,7 +592,7 @@ fn prove_srli_cross_byte() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_slli(2, 1, 8)); // x2 = 0x100
     program.extend_from_slice(&encode_srli(3, 2, 8)); // x3 = 0x100 >> 8 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRAI on a positive number: 8 >> 3 = 1 (same as SRLI for positive values).
@@ -503,7 +601,7 @@ fn prove_srai_positive() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
     program.extend_from_slice(&encode_srai(2, 1, 3)); // x2 = 8 >> 3 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRAI on a negative number: -8 >> 1 = -4 (0xFFFFFFF8 >> 1 = 0xFFFFFFFC).
@@ -513,7 +611,7 @@ fn prove_srai_negative() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, -8i16)); // x1 = 0xFFFFFFF8
     program.extend_from_slice(&encode_srai(2, 1, 1)); // x2 = -8 >> 1 = -4 = 0xFFFFFFFC
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SRAI sign extension: 0x80000000 >> 1 = 0xC0000000 (arithmetic, sign bit propagates).
@@ -523,7 +621,7 @@ fn prove_srai_sign_extension() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 1 << 31 = 0x80000000
     program.extend_from_slice(&encode_srai(3, 2, 1)); // x3 = 0x80000000 >> 1 = 0xC0000000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTU rd, rs1, rs2  — R-type, opcode=0x33, funct3=0x3, funct7=0x00
@@ -573,7 +671,7 @@ fn prove_sltu_less() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_addi(2, 0, 2)); // x2 = 2
     program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (1 < 2) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTU: 2 < 1 = 0 (unsigned).
@@ -583,7 +681,7 @@ fn prove_sltu_not_less() {
     program.extend_from_slice(&encode_addi(1, 0, 2)); // x1 = 2
     program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
     program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (2 < 1) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTU: equal values give 0.
@@ -593,7 +691,7 @@ fn prove_sltu_equal() {
     program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
     program.extend_from_slice(&encode_addi(2, 0, 5)); // x2 = 5
     program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (5 < 5) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTU: 0 < 0xFFFFFFFF = 1 (unsigned wrapping boundary: -1 is very large unsigned).
@@ -603,7 +701,7 @@ fn prove_sltu_wrapping_boundary() {
     // x1 = 0 (already zero)
     program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (0 < 0xFFFF_FFFF) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTU: 0xFFFFFFFF < 0 = 0 (0xFFFFFFFF is the largest unsigned value).
@@ -613,7 +711,7 @@ fn prove_sltu_wrapping_boundary_reversed() {
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
                                                           // x2 = 0 (already zero)
     program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (0xFFFF_FFFF < 0) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLT: positive < negative = 0 (signed: 1 is not less than -1).
@@ -623,7 +721,7 @@ fn prove_slt_positive_vs_negative() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1 (positive)
     program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1 (negative)
     program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (1 < -1 signed) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLT: negative < positive = 1 (signed: -1 is less than 1).
@@ -633,7 +731,7 @@ fn prove_slt_negative_vs_positive() {
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1 (negative)
     program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1 (positive)
     program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (-1 < 1 signed) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLT: both negative, -2 < -1 = 1 (signed).
@@ -643,7 +741,7 @@ fn prove_slt_both_negative() {
     program.extend_from_slice(&encode_addi(1, 0, -2i16)); // x1 = -2
     program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1
     program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (-2 < -1 signed) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLT: equal values give 0.
@@ -653,7 +751,7 @@ fn prove_slt_equal() {
     program.extend_from_slice(&encode_addi(1, 0, 7)); // x1 = 7
     program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
     program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (7 < 7 signed) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTI: rs1=3, imm=5 → 1 (3 < 5 signed).
@@ -662,7 +760,7 @@ fn prove_slti_less() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 3)); // x1 = 3
     program.extend_from_slice(&encode_slti(2, 1, 5)); // x2 = (3 < 5) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTI: rs1=-1, imm=0 → 1 (-1 < 0 signed, sign-extended imm).
@@ -671,7 +769,7 @@ fn prove_slti_negative_rs1() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_slti(2, 1, 0)); // x2 = (-1 < 0) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTI: rs1=5, imm=-1 → 0 (5 is not less than -1 signed).
@@ -680,7 +778,7 @@ fn prove_slti_positive_vs_neg_imm() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
     program.extend_from_slice(&encode_slti(2, 1, -1i16)); // x2 = (5 < -1 signed) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTIU: rs1=3, imm=5 → 1 (3 < 5 unsigned, positive imm).
@@ -689,7 +787,7 @@ fn prove_sltiu_less() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 3)); // x1 = 3
     program.extend_from_slice(&encode_sltiu(2, 1, 5)); // x2 = (3 < 5 unsigned) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTIU: rs1=0, imm=-1 → 1 (0 < 0xFFFF_FFFF unsigned; -1 sign-extended = 0xFFFF_FFFF).
@@ -698,7 +796,7 @@ fn prove_sltiu_zero_vs_max() {
     let mut program = Vec::new();
     // x1 = 0 (already zero)
     program.extend_from_slice(&encode_sltiu(2, 1, -1i16)); // x2 = (0 < 0xFFFF_FFFF) ? 1 : 0 = 1
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SLTIU: rs1=5, imm=5 → 0 (equal values, unsigned).
@@ -707,7 +805,7 @@ fn prove_sltiu_equal() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
     program.extend_from_slice(&encode_sltiu(2, 1, 5)); // x2 = (5 < 5 unsigned) ? 1 : 0 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 // ── Negative tests ────────────────────────────────────────────────────────────
@@ -780,7 +878,7 @@ fn prove_single_sub() {
     program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
     program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
     program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 7
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// SUB wrapping underflow: 0 - 1 = 0xFFFF_FFFF.
@@ -790,7 +888,7 @@ fn prove_sub_wrapping() {
     program.extend_from_slice(&encode_addi(1, 0, 0)); // x1 = 0
     program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
     program.extend_from_slice(&encode_sub(3, 1, 2)); // x3 = 0xFFFF_FFFF (wraps)
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADD + SUB: exercises both R-type instructions together.
@@ -801,7 +899,7 @@ fn prove_mixed_add_sub() {
     program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
     program.extend_from_slice(&encode_add(3, 1, 2)); // x3 = 27
     program.extend_from_slice(&encode_sub(4, 3, 2)); // x4 = 20
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single XOR: x3 = x1 ^ x2. Exercises the register-register XOR path.
@@ -811,7 +909,7 @@ fn prove_single_xor() {
     program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
     program.extend_from_slice(&encode_addi(2, 0, 0b1100)); // x2 = 0b1100
     program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0b0110
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// XOR of a register with itself produces zero: x ^ x == 0.
@@ -820,7 +918,7 @@ fn prove_xor_self_is_zero() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 0x7FF)); // x1 = 0x7FF
     program.extend_from_slice(&encode_xor(2, 1, 1)); // x2 = x1 ^ x1 = 0
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// XOR with all-ones (from XORI -1) produces bitwise complement.
@@ -830,7 +928,7 @@ fn prove_xor_complement() {
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
     program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = ~42 = 0xFFFF_FFD5
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed XOR and ADD: exercises both R-type instruction paths together.
@@ -841,7 +939,7 @@ fn prove_mixed_xor_add() {
     program.extend_from_slice(&encode_addi(2, 0, 0x0F)); // x2 = 0x0F
     program.extend_from_slice(&encode_xor(3, 1, 2)); // x3 = 0xF0
     program.extend_from_slice(&encode_add(4, 3, 1)); // x4 = 0xF0 + 0xFF = 0x1EF
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single ORI: x2 = x1 | 0xFF. Exercises the bytes_or bus.
@@ -850,7 +948,7 @@ fn prove_single_ori() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
     program.extend_from_slice(&encode_ori(2, 1, 0xFF)); // x2 = 5 | 0xFF = 0xFF
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// ORI with a negative (sign-extended) immediate: x2 = x1 | 0xFFFF_FFFF.
@@ -859,7 +957,7 @@ fn prove_ori_negative_immediate() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
     program.extend_from_slice(&encode_ori(2, 1, -1i16)); // x2 = 42 | 0xFFFF_FFFF = 0xFFFF_FFFF
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + ORI program.
@@ -869,7 +967,7 @@ fn prove_mixed_addi_ori() {
     program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
     program.extend_from_slice(&encode_ori(2, 1, 0b0101)); // x2 = 0b1010 | 0b0101 = 0b1111
     program.extend_from_slice(&encode_ori(3, 2, 0x00)); // x3 = 0b1111 | 0 = 0b1111
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Single ANDI: x2 = x1 & 0x0F. Exercises the bytes_and bus.
@@ -878,7 +976,7 @@ fn prove_single_andi() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
     program.extend_from_slice(&encode_andi(2, 1, 0x0F)); // x2 = 0xFF & 0x0F = 0x0F
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// ANDI masking pattern: AND with 0xFF extracts the low byte.
@@ -887,7 +985,7 @@ fn prove_andi_byte_mask() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_andi(2, 1, 0xFF)); // x2 = 0xFFFF_FFFF & 0xFF = 0xFF
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// ANDI with a negative (sign-extended) immediate: x2 = x1 & 0xFFFF_FFFF.
@@ -896,7 +994,7 @@ fn prove_andi_negative_immediate() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
     program.extend_from_slice(&encode_andi(2, 1, -1i16)); // x2 = 42 & 0xFFFF_FFFF = 42
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + ANDI program.
@@ -906,7 +1004,7 @@ fn prove_mixed_addi_andi() {
     program.extend_from_slice(&encode_addi(1, 0, 0b1111)); // x1 = 0b1111
     program.extend_from_slice(&encode_andi(2, 1, 0b1010)); // x2 = 0b1111 & 0b1010 = 0b1010
     program.extend_from_slice(&encode_andi(3, 2, 0b0100)); // x3 = 0b1010 & 0b0100 = 0b0000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Set `is_address_equal` to a non-boolean value (2) in a memory row.
@@ -952,7 +1050,7 @@ fn prove_single_or() {
     program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
     program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
     program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 10 | 7 = 15
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// OR with 0xFFFFFFFF produces all-ones regardless of the other operand.
@@ -962,7 +1060,7 @@ fn prove_or_all_ones() {
     program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
     program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
     program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 5 | 0xFFFF_FFFF = 0xFFFF_FFFF
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed ADDI + OR program exercising both I-type and OR R-type paths.
@@ -973,7 +1071,7 @@ fn prove_mixed_addi_or() {
     program.extend_from_slice(&encode_addi(2, 0, 0x70)); // x2 = 0x70
     program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 0x0F | 0x70 = 0x7F
     program.extend_from_slice(&encode_or(4, 3, 1)); // x4 = 0x7F | 0x0F = 0x7F
-    prove(&program);
+    prove_verify(&program);
 }
 
 // ── LUI / AUIPC ───────────────────────────────────────────────────────────────
@@ -998,7 +1096,7 @@ fn prove_lui_basic() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(2, 0, 1)); // need at least one non-U-type for decode bus
     program.extend_from_slice(&encode_lui(1, 0x12345));
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// LUI with imm_raw = 1 (minimum non-zero): x1 = 0x00001000.
@@ -1007,7 +1105,7 @@ fn prove_lui_min_imm() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(2, 0, 0));
     program.extend_from_slice(&encode_lui(1, 1));
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// LUI with imm_raw = 0xFFFFF (all bits set): x1 = 0xFFFFF000.
@@ -1016,7 +1114,7 @@ fn prove_lui_max_imm() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(2, 0, 0));
     program.extend_from_slice(&encode_lui(1, 0xFFFFF));
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// AUIPC: PC + upper-immediate at PC != 0.
@@ -1027,7 +1125,7 @@ fn prove_auipc_nonzero_pc() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(2, 0, 0)); // PC=0
     program.extend_from_slice(&encode_auipc(1, 1)); // PC=4 => x1 = 4 + 0x1000 = 0x1004
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// AUIPC at PC=0: x1 = 0 + 0x5000 = 0x5000.
@@ -1036,7 +1134,7 @@ fn prove_auipc_at_pc_zero() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_auipc(1, 5)); // PC=0 => x1 = 0x5000
     program.extend_from_slice(&encode_addi(2, 0, 0)); // need non-U-type
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// Mixed LUI and AUIPC in the same program.
@@ -1046,7 +1144,7 @@ fn prove_lui_and_auipc() {
     program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1 (non-U-type)
     program.extend_from_slice(&encode_lui(1, 0xABCDE)); // x1 = 0xABCDE000
     program.extend_from_slice(&encode_auipc(2, 0x1)); // x2 = PC + 0x1000
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// JAL: jump forward, verify rd = pc+4 and execution resumes at target.
@@ -1059,7 +1157,7 @@ fn prove_jal_forward() {
     program.extend_from_slice(&encode_jal(1, 8)); // jal x1, 8
     program.extend_from_slice(&encode_addi(2, 0, 99)); // skipped
     program.extend_from_slice(&encode_addi(3, 0, 42)); // executed
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// JAL with rd=x0: unconditional jump, return address discarded.
@@ -1072,7 +1170,7 @@ fn prove_jal_rd_zero() {
     program.extend_from_slice(&encode_jal(0, 8)); // jal x0, +8
     program.extend_from_slice(&encode_addi(1, 0, 99)); // skipped
     program.extend_from_slice(&encode_addi(2, 0, 7)); // executed
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// JALR: jump to rs1+imm, return address in rd.
@@ -1087,7 +1185,7 @@ fn prove_jalr_basic() {
     program.extend_from_slice(&encode_jalr(2, 1, 0)); // x2 = 8, jump to 12
     program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
     program.extend_from_slice(&encode_addi(4, 0, 55)); // executed
-    prove(&program);
+    prove_verify(&program);
 }
 
 /// JALR with non-zero immediate: jump to rs1+imm.
@@ -1102,5 +1200,5 @@ fn prove_jalr_with_imm() {
     program.extend_from_slice(&encode_jalr(2, 1, 4)); // x2 = 8, jump to 12
     program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
     program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
-    prove(&program);
+    prove_verify(&program);
 }
