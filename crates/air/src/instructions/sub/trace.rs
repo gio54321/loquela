@@ -2,9 +2,9 @@ use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
 
-use super::air::{AddColumns, NUM_ADD_COLS};
+use super::air::{SubColumns, NUM_SUB_COLS};
 
-struct AddStep {
+struct SubStep {
     pc: u32,
     timestamp: u32,
     rd: u8,
@@ -16,12 +16,12 @@ struct AddStep {
     rd_new_value: u32,
 }
 
-fn extract_add_steps(steps: &[ExecutionStep]) -> Vec<AddStep> {
+fn extract_sub_steps(steps: &[ExecutionStep]) -> Vec<SubStep> {
     steps
         .iter()
         .filter_map(|step| {
             let (rd, rs1, rs2) = match step.instruction {
-                Instruction::Add { rd, rs1, rs2 } => (rd, rs1, rs2),
+                Instruction::Sub { rd, rs1, rs2 } => (rd, rs1, rs2),
                 _ => return None,
             };
             let (timestamp, rs1_value, rs2_value, old_rd_value, rd_new_value) =
@@ -37,7 +37,7 @@ fn extract_add_steps(steps: &[ExecutionStep]) -> Vec<AddStep> {
                     }] => (*timestamp, *v1, *v2, *old_value, *new_value),
                     _ => return None,
                 };
-            Some(AddStep {
+            Some(SubStep {
                 pc: step.state.pc,
                 timestamp,
                 rd,
@@ -73,20 +73,23 @@ fn pc_plus4_carries(pc: u32) -> [u8; 3] {
     [c0, c1, c2]
 }
 
-fn u32_add_carries(x: u32, y: u32) -> [u8; 4] {
+fn u32_sub_borrows(x: u32, y: u32) -> [u8; 4] {
     let xb = x.to_le_bytes();
     let yb = y.to_le_bytes();
-    let mut carries = [0u8; 4];
-    let mut carry = 0u32;
+    let mut borrows = [0u8; 4];
+    let mut borrow = 0u32;
     for i in 0..4 {
-        let sum = xb[i] as u32 + yb[i] as u32 + carry;
-        carries[i] = (sum >> 8) as u8;
-        carry = carries[i] as u32;
+        // x[i] + 256 * borrow_out = y[i] + borrow_in + diff[i]
+        // borrow_out = 1 iff x[i] < y[i] + borrow_in
+        let lhs = xb[i] as u32;
+        let rhs = yb[i] as u32 + borrow;
+        borrows[i] = if lhs < rhs { 1 } else { 0 };
+        borrow = borrows[i] as u32;
     }
-    carries
+    borrows
 }
 
-fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddColumns<F>, step: &AddStep) {
+fn fill_row<F: PrimeCharacteristicRing>(row: &mut SubColumns<F>, step: &SubStep) {
     row.pc = u32_to_limbs(step.pc);
     row.timestamp = F::from_u64(step.timestamp as u64);
     row.rd = F::from_u64(step.rd as u64);
@@ -98,12 +101,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddColumns<F>, step: &AddStep)
     row.old_rd_value = u32_to_limbs(step.old_rd_value);
     row.rd_new_value = u32_to_limbs(step.rd_new_value);
 
-    let carries = u32_add_carries(step.rs1_value, step.rs2_value);
-    row.add_carries = [
-        F::from_u64(carries[0] as u64),
-        F::from_u64(carries[1] as u64),
-        F::from_u64(carries[2] as u64),
-        F::from_u64(carries[3] as u64),
+    let borrows = u32_sub_borrows(step.rs1_value, step.rs2_value);
+    row.sub_borrows = [
+        F::from_u64(borrows[0] as u64),
+        F::from_u64(borrows[1] as u64),
+        F::from_u64(borrows[2] as u64),
+        F::from_u64(borrows[3] as u64),
     ];
 
     row.is_dummy = F::ONE;
@@ -117,8 +120,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut AddColumns<F>, step: &AddStep)
     ];
 }
 
-fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AddColumns<F>) {
-    *row = AddColumns {
+fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut SubColumns<F>) {
+    *row = SubColumns {
         pc: [F::ZERO; 4],
         timestamp: F::ZERO,
         rd: F::ZERO,
@@ -128,34 +131,34 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut AddColumns<F>) {
         rs2_value: [F::ZERO; 4],
         old_rd_value: [F::ZERO; 4],
         rd_new_value: [F::ZERO; 4],
-        add_carries: [F::ZERO; 4],
+        sub_borrows: [F::ZERO; 4],
         next_pc: [F::from_u64(4), F::ZERO, F::ZERO, F::ZERO],
         next_pc_carries: [F::ZERO; 3],
         is_dummy: F::ZERO,
     };
 }
 
-/// Build the ADD execution trace from the VM execution steps.
+/// Build the SUB execution trace from the VM execution steps.
 pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
     steps: &[ExecutionStep],
 ) -> DenseMatrix<F> {
-    let add_steps = extract_add_steps(steps);
-    assert!(!add_steps.is_empty(), "no ADD steps found in trace");
+    let sub_steps = extract_sub_steps(steps);
+    assert!(!sub_steps.is_empty(), "no SUB steps found in trace");
 
-    let num_rows = add_steps.len().next_power_of_two().max(4);
-    let mut values = vec![F::ZERO; num_rows * NUM_ADD_COLS];
+    let num_rows = sub_steps.len().next_power_of_two().max(4);
+    let mut values = vec![F::ZERO; num_rows * NUM_SUB_COLS];
 
-    let (prefix, rows, suffix) = unsafe { values.align_to_mut::<AddColumns<F>>() };
+    let (prefix, rows, suffix) = unsafe { values.align_to_mut::<SubColumns<F>>() };
     assert!(prefix.is_empty(), "alignment mismatch");
     assert!(suffix.is_empty(), "alignment mismatch");
     assert_eq!(rows.len(), num_rows);
 
-    for (row, step) in rows.iter_mut().zip(add_steps.iter()) {
+    for (row, step) in rows.iter_mut().zip(sub_steps.iter()) {
         fill_row(row, step);
     }
-    for row in rows.iter_mut().skip(add_steps.len()) {
+    for row in rows.iter_mut().skip(sub_steps.len()) {
         fill_padding_row(row);
     }
 
-    DenseMatrix::new(values, NUM_ADD_COLS)
+    DenseMatrix::new(values, NUM_SUB_COLS)
 }
