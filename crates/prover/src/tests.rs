@@ -291,6 +291,37 @@ fn encode_sra(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+/// SLLI rd, rs1, shamt  — I-type, opcode=0x13, funct3=0x1, imm[11:5]=0b0000000
+fn encode_slli(rd: u8, rs1: u8, shamt: u8) -> [u8; 4] {
+    let word = ((shamt as u32 & 0x1F) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b001 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+/// SRLI rd, rs1, shamt  — I-type, opcode=0x13, funct3=0x5, imm[11:5]=0b0000000
+fn encode_srli(rd: u8, rs1: u8, shamt: u8) -> [u8; 4] {
+    let word = ((shamt as u32 & 0x1F) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b101 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+/// SRAI rd, rs1, shamt  — I-type, opcode=0x13, funct3=0x5, imm[11:5]=0b0100000
+fn encode_srai(rd: u8, rs1: u8, shamt: u8) -> [u8; 4] {
+    let word = (0b010_0000u32 << 25)
+        | ((shamt as u32 & 0x1F) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b101 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
 /// SRA on a positive number: 8 >> 3 = 1 (same as SRL for positive values).
 #[test]
 fn prove_sra_positive() {
@@ -334,6 +365,94 @@ fn prove_sra_sign_extension() {
                                                      // Now shift right arithmetically by 1 — result is 0xC0000000 (sign extends).
     program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
     program.extend_from_slice(&encode_sra(5, 3, 4)); // x5 = 0x80000000 >> 1 = 0xC0000000
+    prove(&program);
+}
+
+/// Single SLLI: x2 = x1 << 3 (1 << 3 = 8).
+#[test]
+fn prove_single_slli() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_slli(2, 1, 3)); // x2 = 1 << 3 = 8
+    prove(&program);
+}
+
+/// SLLI by zero: result equals the input (identity).
+#[test]
+fn prove_slli_by_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_slli(2, 1, 0)); // x2 = 42 << 0 = 42
+    prove(&program);
+}
+
+/// SLLI overflow: 0x80000000 << 1 = 0 (wrapping u32).
+#[test]
+fn prove_slli_overflow() {
+    let mut program = Vec::new();
+    // Build x1 = 0x80000000 via SLL
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 1 << 31 = 0x80000000
+    program.extend_from_slice(&encode_slli(3, 2, 1)); // x3 = 0x80000000 << 1 = 0
+    prove(&program);
+}
+
+/// Single SRLI: x2 = x1 >> 3 (8 >> 3 = 1).
+#[test]
+fn prove_single_srli() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
+    program.extend_from_slice(&encode_srli(2, 1, 3)); // x2 = 8 >> 3 = 1
+    prove(&program);
+}
+
+/// SRLI of 0x80000000 >> 1 = 0x40000000 (logical, not arithmetic — high bit not propagated).
+#[test]
+fn prove_srli_logical_not_arithmetic() {
+    let mut program = Vec::new();
+    // Build x1 = 0x80000000 via SLLI
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 0x80000000
+    program.extend_from_slice(&encode_srli(3, 2, 1)); // x3 = 0x80000000 >> 1 = 0x40000000
+    prove(&program);
+}
+
+/// SRLI crossing byte boundary (shamt=8): 0x100 >> 8 = 1.
+#[test]
+fn prove_srli_cross_byte() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_slli(2, 1, 8)); // x2 = 0x100
+    program.extend_from_slice(&encode_srli(3, 2, 8)); // x3 = 0x100 >> 8 = 1
+    prove(&program);
+}
+
+/// SRAI on a positive number: 8 >> 3 = 1 (same as SRLI for positive values).
+#[test]
+fn prove_srai_positive() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
+    program.extend_from_slice(&encode_srai(2, 1, 3)); // x2 = 8 >> 3 = 1
+    prove(&program);
+}
+
+/// SRAI on a negative number: -8 >> 1 = -4 (0xFFFFFFF8 >> 1 = 0xFFFFFFFC).
+/// Arithmetic shift fills vacated high bits with sign bit (1).
+#[test]
+fn prove_srai_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -8i16)); // x1 = 0xFFFFFFF8
+    program.extend_from_slice(&encode_srai(2, 1, 1)); // x2 = -8 >> 1 = -4 = 0xFFFFFFFC
+    prove(&program);
+}
+
+/// SRAI sign extension: 0x80000000 >> 1 = 0xC0000000 (arithmetic, sign bit propagates).
+#[test]
+fn prove_srai_sign_extension() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_slli(2, 1, 31)); // x2 = 1 << 31 = 0x80000000
+    program.extend_from_slice(&encode_srai(3, 2, 1)); // x3 = 0x80000000 >> 1 = 0xC0000000
     prove(&program);
 }
 
