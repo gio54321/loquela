@@ -1109,12 +1109,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_singles.push(imm_u_bytes[2]);
                 byte_checked_singles.push(imm_u_bytes[3]);
             }
-            [MemoryOperation::Write { new_value: rd, .. }]
-                if matches!(s.instruction, Instruction::Jal { .. }) =>
-            {
-                // JAL: pc bytes and rd_val (=pc+4) bytes are range-checked.
+            // JAL: pc bytes and rd_val (=pc+4) bytes are range-checked by the
+            // AIR regardless of whether the write to rd is suppressed (rd=0).
+            // Match by instruction shape, ignoring the memory_ops vec which is
+            // empty for JAL with rd=0.
+            _ if matches!(s.instruction, Instruction::Jal { .. }) => {
                 byte_checked_vals.push(s.state.pc);
-                byte_checked_vals.push(*rd);
+                byte_checked_vals.push(s.state.pc.wrapping_add(4));
             }
             [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
                 if matches!(s.instruction, Instruction::Jalr { .. }) =>

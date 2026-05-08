@@ -680,23 +680,26 @@ impl VM {
                 registers[*rd as usize] = result;
             }
             Instruction::Jal { rd, imm } => {
-                let old_rd = registers[*rd as usize];
-                let return_addr = if *rd == 0 { 0 } else { pc.wrapping_add(4) };
                 let next_pc = pc.wrapping_add(*imm as u32);
 
-                // Write return address to rd (or 0 if rd=x0).
-                ops.push(MemoryOperation::Write {
-                    memory_type: MemoryType::Register,
-                    address: *rd as u32,
-                    timestamp: self.timestamp,
-                    old_value: old_rd,
-                    new_value: return_addr,
-                });
-                self.timestamp += 1;
-
+                // Write return address to rd, except for rd=x0: x0 must always
+                // read 0 in RISC-V, so we silently drop the write rather than
+                // committing a real-but-discarded memory op. The timestamp still
+                // advances by 1 so the trace bus stays consistent regardless of
+                // whether rd=0.
                 if *rd != 0 {
+                    let old_rd = registers[*rd as usize];
+                    let return_addr = pc.wrapping_add(4);
+                    ops.push(MemoryOperation::Write {
+                        memory_type: MemoryType::Register,
+                        address: *rd as u32,
+                        timestamp: self.timestamp,
+                        old_value: old_rd,
+                        new_value: return_addr,
+                    });
                     registers[*rd as usize] = return_addr;
                 }
+                self.timestamp += 1;
 
                 self.trace.push(ExecutionStep {
                     state: VMState { pc, registers },

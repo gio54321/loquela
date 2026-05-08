@@ -1,5 +1,5 @@
 use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::DenseMatrix;
 
 use super::air::{JalColumns, NUM_JAL_COLS};
@@ -20,13 +20,25 @@ struct JalStep {
 }
 
 fn extract_jal_steps(steps: &[ExecutionStep]) -> Vec<JalStep> {
-    steps
-        .iter()
-        .filter_map(|step| {
-            let (rd, imm) = match step.instruction {
-                Instruction::Jal { rd, imm } => (rd, imm),
-                _ => return None,
-            };
+    let mut out = Vec::new();
+    let mut running_ts: u32 = 0;
+    for step in steps {
+        let entry_ts = running_ts;
+        // Each step consumes one timestamp per memory op, plus one extra for
+        // JAL with rd=0 (no memory op but the VM still increments timestamp).
+        let consumed = if step.memory_ops.is_empty()
+            && matches!(step.instruction, Instruction::Jal { rd: 0, .. })
+        {
+            1
+        } else {
+            step.memory_ops.len() as u32
+        };
+
+        if let Instruction::Jal { rd, imm } = step.instruction {
+            // For rd != 0 the VM emits one Write op with the canonical
+            // (timestamp, old, new) triple. For rd == 0 there is no Write
+            // op (x0 is silently skipped), so derive rd_val from pc and use
+            // 0 for old_rd_value (x0's invariant).
             let (timestamp, old_rd_value, rd_val) = match step.memory_ops.as_slice() {
                 [MemoryOperation::Write {
                     timestamp,
@@ -34,7 +46,11 @@ fn extract_jal_steps(steps: &[ExecutionStep]) -> Vec<JalStep> {
                     new_value,
                     ..
                 }] => (*timestamp, *old_value, *new_value),
-                _ => return None,
+                [] if rd == 0 => (entry_ts, 0, step.state.pc.wrapping_add(4)),
+                _ => {
+                    running_ts += consumed;
+                    continue;
+                }
             };
             // Reconstruct the raw instruction word fields from the immediate.
             // J-type immediate: {imm[20], imm[10:1], imm[11], imm[19:12]}.
@@ -48,7 +64,7 @@ fn extract_jal_steps(steps: &[ExecutionStep]) -> Vec<JalStep> {
             // imm_high12 = {imm[20], imm[10:1], imm[11]} = imm10_1 | (imm11 << 10) | (imm20 << 11)
             let imm_high12 = imm10_1 | (imm11 << 10) | (imm20 << 11);
             let imm_lo8 = imm19_12;
-            Some(JalStep {
+            out.push(JalStep {
                 pc: step.state.pc,
                 timestamp,
                 rd,
@@ -57,9 +73,11 @@ fn extract_jal_steps(steps: &[ExecutionStep]) -> Vec<JalStep> {
                 imm_j: imm,
                 rd_val,
                 old_rd_value,
-            })
-        })
-        .collect()
+            });
+        }
+        running_ts += consumed;
+    }
+    out
 }
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
@@ -96,7 +114,7 @@ fn u32_add_carries(x: u32, y: u32) -> [u8; 4] {
     carries
 }
 
-fn fill_row<F: PrimeCharacteristicRing>(row: &mut JalColumns<F>, step: &JalStep) {
+fn fill_row<F: Field>(row: &mut JalColumns<F>, step: &JalStep) {
     row.pc = u32_to_limbs(step.pc);
     row.timestamp = F::from_u64(step.timestamp as u64);
     row.rd = F::from_u64(step.rd as u64);
@@ -141,6 +159,15 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut JalColumns<F>, step: &JalStep)
         F::from_u64(carries[2] as u64),
     ];
 
+    // rd_is_zero indicator and rd_inv witness.
+    if step.rd == 0 {
+        row.rd_is_zero = F::ONE;
+        row.rd_inv = F::ZERO; // unused but constraint accepts any value when rd=0
+    } else {
+        row.rd_is_zero = F::ZERO;
+        row.rd_inv = F::from_u64(step.rd as u64).inverse();
+    }
+
     row.is_dummy = F::ONE;
 }
 
@@ -159,11 +186,15 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut JalColumns<F>) {
         rd_val_carries: [F::ZERO; 3],
         old_rd_value: [F::ZERO; 4],
         next_pc: [F::ZERO; 4],
+        // Padding rows have rd=0, so rd_is_zero must be 1 to satisfy the
+        // is-zero indicator constraints.
+        rd_is_zero: F::ONE,
+        rd_inv: F::ZERO,
         is_dummy: F::ZERO,
     };
 }
 
-pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
+pub fn build_trace<F: Field + Send + Sync>(
     steps: &[ExecutionStep],
 ) -> DenseMatrix<F> {
     let jal_steps = extract_jal_steps(steps);

@@ -65,6 +65,14 @@ pub struct JalColumns<F> {
     /// next_pc = pc + imm_j as four byte limbs.
     pub next_pc: [F; 4],
 
+    /// 1 if rd == 0 (i.e. x0, where the return-address write is silently
+    /// dropped per RISC-V semantics), else 0.
+    pub rd_is_zero: F,
+    /// Witness inverse of rd. Required by the rd_is_zero "is-zero" gadget:
+    /// when rd != 0 it equals rd^{-1}; when rd == 0 it can be any value
+    /// (and the rd*rd_is_zero=0 constraint forces rd_is_zero=1).
+    pub rd_inv: F,
+
     /// Padding selector: 1 for real execution rows, 0 for dummy/padding rows.
     pub is_dummy: F,
 }
@@ -214,6 +222,18 @@ where
 
         // rd_val = pc + 4
         u32_plus_four(builder, &local.pc, &local.rd_val, &local.rd_val_carries);
+
+        // rd_is_zero indicator: 1 if rd == 0, else 0.
+        // Standard "is-zero" gadget using a witness inverse rd_inv:
+        //   rd_is_zero is boolean
+        //   rd * rd_is_zero == 0       (if rd != 0, then rd_is_zero must be 0)
+        //   rd * rd_inv + rd_is_zero == 1   (if rd == 0, then rd_is_zero must be 1)
+        builder.assert_bool(local.rd_is_zero.clone());
+        builder.assert_zero(local.rd.clone() * local.rd_is_zero.clone());
+        builder.assert_eq(
+            local.rd.clone() * local.rd_inv.clone() + local.rd_is_zero.clone().into(),
+            AB::Expr::ONE,
+        );
     }
 }
 
@@ -266,7 +286,8 @@ impl<F: Field> LookupAir<F> for JalAir {
             )],
         ));
 
-        // Write rd = pc+4 at timestamp.
+        // Write rd = pc+4 at timestamp. Suppressed for rd == x0 (the VM
+        // silently drops that write); gate the send with (1 - rd_is_zero).
         lookups.push(self.register_lookup(
             Kind::Global(String::from("memory")),
             &vec![(
@@ -277,7 +298,13 @@ impl<F: Field> LookupAir<F> for JalAir {
                     .chain(local.old_rd_value.into_iter().map(Into::into))
                     .chain(local.rd_val.into_iter().map(Into::into))
                     .collect(),
-                local.is_dummy.into(),
+                {
+                    let one_minus_rdz: p3_air::SymbolicExpression<F> =
+                        Into::<p3_air::SymbolicExpression<F>>::into(F::ONE)
+                            - Into::<p3_air::SymbolicExpression<F>>::into(local.rd_is_zero);
+                    let is_dummy: p3_air::SymbolicExpression<F> = local.is_dummy.into();
+                    is_dummy * one_minus_rdz
+                },
                 Direction::Send,
             )],
         ));
