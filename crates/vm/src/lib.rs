@@ -32,6 +32,11 @@ pub enum Instruction {
     Bge { rs1: u8, rs2: u8, imm: i32 },
     Bltu { rs1: u8, rs2: u8, imm: i32 },
     Bgeu { rs1: u8, rs2: u8, imm: i32 },
+    Lw { rd: u8, rs1: u8, imm: i32 },
+    Lh { rd: u8, rs1: u8, imm: i32 },
+    Lb { rd: u8, rs1: u8, imm: i32 },
+    Lhu { rd: u8, rs1: u8, imm: i32 },
+    Lbu { rd: u8, rs1: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -659,6 +664,62 @@ impl VM {
                 self.pc = next_pc;
                 return Ok(());
             }
+            Instruction::Lw { rd, rs1, imm }
+            | Instruction::Lh { rd, rs1, imm }
+            | Instruction::Lb { rd, rs1, imm }
+            | Instruction::Lhu { rd, rs1, imm }
+            | Instruction::Lbu { rd, rs1, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let old_rd = registers[*rd as usize];
+                let addr = rs1_val.wrapping_add(*imm as u32);
+
+                // Read from rs1 register.
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+
+                // Read from RAM.
+                let ram_val = *self.memory.get(&addr).unwrap_or(&0);
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Ram,
+                    address: addr,
+                    timestamp: self.timestamp,
+                    value: ram_val,
+                });
+                self.timestamp += 1;
+
+                // Compute result based on instruction type.
+                let result = match &instruction {
+                    Instruction::Lw { .. } => ram_val,
+                    Instruction::Lhu { .. } => ram_val & 0xFFFF,
+                    Instruction::Lbu { .. } => ram_val & 0xFF,
+                    Instruction::Lh { .. } => {
+                        let half = (ram_val & 0xFFFF) as u16;
+                        (half as i16 as i32) as u32
+                    }
+                    Instruction::Lb { .. } => {
+                        let byte = (ram_val & 0xFF) as u8;
+                        (byte as i8 as i32) as u32
+                    }
+                    _ => unreachable!(),
+                };
+
+                // Write result to rd register.
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -847,6 +908,36 @@ impl VM {
                 0b111 => Instruction::Bgeu { rs1, rs2, imm },
                 _ => unimplemented!("unsupported B-type funct3"),
             }
+        } else if bytes & 0b1111111 == 0b0000011 && (bytes >> 12) & 0b111 == 0b010 {
+            // LW: I-type, opcode=0x03, funct3=0x2
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Lw { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0000011 && (bytes >> 12) & 0b111 == 0b001 {
+            // LH: I-type, opcode=0x03, funct3=0x1
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Lh { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0000011 && (bytes >> 12) & 0b111 == 0b000 {
+            // LB: I-type, opcode=0x03, funct3=0x0
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Lb { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0000011 && (bytes >> 12) & 0b111 == 0b101 {
+            // LHU: I-type, opcode=0x03, funct3=0x5
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Lhu { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0000011 && (bytes >> 12) & 0b111 == 0b100 {
+            // LBU: I-type, opcode=0x03, funct3=0x4
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let imm = (bytes as i32) >> 20;
+            Instruction::Lbu { rd, rs1, imm }
         } else {
             unimplemented!("not supported");
         }
