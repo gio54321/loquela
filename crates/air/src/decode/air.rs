@@ -369,12 +369,14 @@ impl<F: Field> LookupAir<F> for DecodeAir {
         lookups.push(self.register_lookup(
             Kind::Global(String::from("decode")),
             &vec![(
-                vec![
-                    local.instr_type_packed.into(),
-                    local.rd.into(),
-                    local.rs1.into(),
-                    field4,
-                ],
+                local.pc.iter().cloned().map(Into::into)
+                    .chain([
+                        local.instr_type_packed.into(),
+                        local.rd.into(),
+                        local.rs1.into(),
+                        field4,
+                    ])
+                    .collect(),
                 local.mult.into(),
                 Direction::Receive,
             )],
