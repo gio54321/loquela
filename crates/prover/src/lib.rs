@@ -22,6 +22,10 @@ use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
 use loquela_air::instructions::sll::air::SllAir;
 use loquela_air::instructions::slli::air::SlliAir;
+use loquela_air::instructions::slt::air::SltAir;
+use loquela_air::instructions::slti::air::SltiAir;
+use loquela_air::instructions::sltiu::air::SltiuAir;
+use loquela_air::instructions::sltu::air::SltuAir;
 use loquela_air::instructions::sra::air::SraAir;
 use loquela_air::instructions::srai::air::SraiAir;
 use loquela_air::instructions::srl::air::SrlAir;
@@ -99,6 +103,10 @@ pub enum LoquelAir {
     U32Lt(U32LessThanAir),
     TimestampLt(TimestampLessThanAir),
     BytesLt(LessThanAir),
+    Slt(SltAir),
+    Sltu(SltuAir),
+    Slti(SltiAir),
+    Sltiu(SltiuAir),
 }
 
 impl<F: Field> BaseAir<F> for LoquelAir {
@@ -126,6 +134,10 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::U32Lt(a) => BaseAir::<F>::width(a),
             LoquelAir::TimestampLt(a) => BaseAir::<F>::width(a),
             LoquelAir::BytesLt(a) => BaseAir::<F>::width(a),
+            LoquelAir::Slt(a) => BaseAir::<F>::width(a),
+            LoquelAir::Sltu(a) => BaseAir::<F>::width(a),
+            LoquelAir::Slti(a) => BaseAir::<F>::width(a),
+            LoquelAir::Sltiu(a) => BaseAir::<F>::width(a),
         }
     }
 
@@ -173,6 +185,10 @@ where
             LoquelAir::U32Lt(a) => a.eval(builder),
             LoquelAir::TimestampLt(a) => a.eval(builder),
             LoquelAir::BytesLt(a) => a.eval(builder),
+            LoquelAir::Slt(a) => a.eval(builder),
+            LoquelAir::Sltu(a) => a.eval(builder),
+            LoquelAir::Slti(a) => a.eval(builder),
+            LoquelAir::Sltiu(a) => a.eval(builder),
         }
     }
 }
@@ -204,6 +220,10 @@ impl<F: Field> LookupAir<F> for LoquelAir {
                 <TimestampLessThanAir as LookupAir<F>>::add_lookup_columns(a)
             }
             LoquelAir::BytesLt(a) => <LessThanAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Slt(a) => <SltAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Sltu(a) => <SltuAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Slti(a) => <SltiAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::add_lookup_columns(a),
         }
     }
 
@@ -231,6 +251,10 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::U32Lt(a) => <U32LessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::TimestampLt(a) => <TimestampLessThanAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::BytesLt(a) => <LessThanAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Slt(a) => <SltAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Sltu(a) => <SltuAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Slti(a) => <SltiAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::get_lookups(a),
         }
     }
 }
@@ -275,6 +299,14 @@ pub struct AllTraces {
     pub srli: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains SRAI instructions (instruction AIR).
     pub srai: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLT instructions (instruction AIR).
+    pub slt: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLTU instructions (instruction AIR).
+    pub sltu: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLTI instructions (instruction AIR).
+    pub slti: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLTIU instructions (instruction AIR).
+    pub sltiu: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -304,6 +336,10 @@ impl AllTraces {
             slli,
             srli,
             srai,
+            slt,
+            sltu,
+            slti,
+            sltiu,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -353,6 +389,18 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = srai {
+            traces.push(t);
+        }
+        if let Some(t) = slt {
+            traces.push(t);
+        }
+        if let Some(t) = sltu {
+            traces.push(t);
+        }
+        if let Some(t) = slti {
+            traces.push(t);
+        }
+        if let Some(t) = sltiu {
             traces.push(t);
         }
         (airs, traces)
@@ -521,6 +569,18 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_srai = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::SraiI { .. }));
+    let has_slt = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Slt { .. }));
+    let has_sltu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Sltu { .. }));
+    let has_slti = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::SltiI { .. }));
+    let has_sltiu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::SltiuI { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -598,6 +658,34 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let srai_trace = if has_srai {
         Some(loquela_air::instructions::srai::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let slt_trace = if has_slt {
+        Some(loquela_air::instructions::slt::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let sltu_trace = if has_sltu {
+        Some(loquela_air::instructions::sltu::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let slti_trace = if has_slti {
+        Some(loquela_air::instructions::slti::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let sltiu_trace = if has_sltiu {
+        Some(loquela_air::instructions::sltiu::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -693,6 +781,58 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(*rd);
                 let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
                 byte_checked_vals.push(rs1_byte3_low7);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Sltu { .. }) =>
+            {
+                // SLTU: rs1_bytes, rs2_bytes, diff_bytes are range-checked.
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                let diff = rs1.wrapping_sub(*rs2);
+                byte_checked_vals.push(diff);
+                let _ = rd;
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Slt { .. }) =>
+            {
+                // SLT: rs1_bytes, rs2_bytes, diff_bytes, rs1_byte3_low7, rs2_byte3_low7 range-checked.
+                byte_checked_vals.push(*rs1);
+                byte_checked_vals.push(*rs2);
+                let diff = rs1.wrapping_sub(*rs2);
+                byte_checked_vals.push(diff);
+                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
+                byte_checked_vals.push(rs1_byte3_low7);
+                let rs2_byte3_low7 = (rs2 >> 24) & 0x7F;
+                byte_checked_vals.push(rs2_byte3_low7);
+                let _ = rd;
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::SltiuI { .. }) =>
+            {
+                // SLTIU: rs1_bytes and diff_bytes are range-checked.
+                let imm = match s.instruction {
+                    Instruction::SltiuI { imm, .. } => imm as u32,
+                    _ => unreachable!(),
+                };
+                byte_checked_vals.push(*rs1);
+                let diff = rs1.wrapping_sub(imm);
+                byte_checked_vals.push(diff);
+                let _ = rd;
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::SltiI { .. }) =>
+            {
+                // SLTI: rs1_bytes, diff_bytes, rs1_byte3_low7 are range-checked.
+                let imm = match s.instruction {
+                    Instruction::SltiI { imm, .. } => imm as u32,
+                    _ => unreachable!(),
+                };
+                byte_checked_vals.push(*rs1);
+                let diff = rs1.wrapping_sub(imm);
+                byte_checked_vals.push(diff);
+                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
+                byte_checked_vals.push(rs1_byte3_low7);
+                let _ = rd;
             }
             _ => {}
         }
@@ -880,6 +1020,18 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_srai {
         airs.push(LoquelAir::Srai(SraiAir::new()));
     }
+    if has_slt {
+        airs.push(LoquelAir::Slt(SltAir::new()));
+    }
+    if has_sltu {
+        airs.push(LoquelAir::Sltu(SltuAir::new()));
+    }
+    if has_slti {
+        airs.push(LoquelAir::Slti(SltiAir::new()));
+    }
+    if has_sltiu {
+        airs.push(LoquelAir::Sltiu(SltiuAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -905,6 +1057,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         slli: slli_trace,
         srli: srli_trace,
         srai: srai_trace,
+        slt: slt_trace,
+        sltu: sltu_trace,
+        slti: slti_trace,
+        sltiu: sltiu_trace,
     }
 }
 
