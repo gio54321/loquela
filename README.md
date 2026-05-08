@@ -40,6 +40,6 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] SRL
 - [ ] SRA
 - [ ] OR
-- [ ] AND
+- [X] AND
 - [ ] ECALL
 - [ ] EBREAK
