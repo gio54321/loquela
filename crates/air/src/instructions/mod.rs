@@ -4,6 +4,8 @@ pub mod and;
 pub mod andi;
 pub mod or;
 pub mod ori;
+pub mod sll;
+pub mod srl;
 pub mod sub;
 pub mod xor;
 pub mod xori;
