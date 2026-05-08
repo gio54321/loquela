@@ -29,7 +29,12 @@ use loquela_air::instructions::bltu::air::BltuAir;
 use loquela_air::instructions::bne::air::BneAir;
 use loquela_air::instructions::jal::air::JalAir;
 use loquela_air::instructions::jalr::air::JalrAir;
+use loquela_air::instructions::lb::air::LbAir;
+use loquela_air::instructions::lbu::air::LbuAir;
+use loquela_air::instructions::lh::air::LhAir;
+use loquela_air::instructions::lhu::air::LhuAir;
 use loquela_air::instructions::lui::air::LuiAir;
+use loquela_air::instructions::lw::air::LwAir;
 use loquela_air::instructions::sll::air::SllAir;
 use loquela_air::instructions::slli::air::SlliAir;
 use loquela_air::instructions::slt::air::SltAir;
@@ -127,6 +132,11 @@ pub enum LoquelAir {
     Bge(BgeAir),
     Bltu(BltuAir),
     Bgeu(BgeuAir),
+    Lw(LwAir),
+    Lh(LhAir),
+    Lb(LbAir),
+    Lhu(LhuAir),
+    Lbu(LbuAir),
 }
 
 impl<F: Field> BaseAir<F> for LoquelAir {
@@ -168,6 +178,11 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Bge(a) => BaseAir::<F>::width(a),
             LoquelAir::Bltu(a) => BaseAir::<F>::width(a),
             LoquelAir::Bgeu(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lw(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lh(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lb(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lhu(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lbu(a) => BaseAir::<F>::width(a),
         }
     }
 
@@ -229,6 +244,11 @@ where
             LoquelAir::Bge(a) => a.eval(builder),
             LoquelAir::Bltu(a) => a.eval(builder),
             LoquelAir::Bgeu(a) => a.eval(builder),
+            LoquelAir::Lw(a) => a.eval(builder),
+            LoquelAir::Lh(a) => a.eval(builder),
+            LoquelAir::Lb(a) => a.eval(builder),
+            LoquelAir::Lhu(a) => a.eval(builder),
+            LoquelAir::Lbu(a) => a.eval(builder),
         }
     }
 }
@@ -274,6 +294,11 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Bge(a) => <BgeAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bltu(a) => <BltuAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bgeu(a) => <BgeuAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lw(a) => <LwAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lh(a) => <LhAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lb(a) => <LbAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lhu(a) => <LhuAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lbu(a) => <LbuAir as LookupAir<F>>::add_lookup_columns(a),
         }
     }
 
@@ -315,6 +340,11 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Bge(a) => <BgeAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bltu(a) => <BltuAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bgeu(a) => <BgeuAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lw(a) => <LwAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lh(a) => <LhAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lb(a) => <LbAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lhu(a) => <LhuAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lbu(a) => <LbuAir as LookupAir<F>>::get_lookups(a),
         }
     }
 }
@@ -387,6 +417,16 @@ pub struct AllTraces {
     pub bltu: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains BGEU instructions.
     pub bgeu: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LW instructions.
+    pub lw: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LH instructions.
+    pub lh: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LB instructions.
+    pub lb: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LHU instructions.
+    pub lhu: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LBU instructions.
+    pub lbu: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -430,6 +470,11 @@ impl AllTraces {
             bge,
             bltu,
             bgeu,
+            lw,
+            lh,
+            lb,
+            lhu,
+            lbu,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -521,6 +566,21 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = bgeu {
+            traces.push(t);
+        }
+        if let Some(t) = lw {
+            traces.push(t);
+        }
+        if let Some(t) = lh {
+            traces.push(t);
+        }
+        if let Some(t) = lb {
+            traces.push(t);
+        }
+        if let Some(t) = lhu {
+            traces.push(t);
+        }
+        if let Some(t) = lbu {
             traces.push(t);
         }
         (airs, traces)
@@ -650,8 +710,17 @@ fn memory_lookup_entries(
 /// The returned `AllTraces` can be inspected or mutated before passing to
 /// `prove_traces`, which is useful for negative testing.
 pub fn generate_traces(program: &[u8]) -> AllTraces {
+    generate_traces_with_ram(program, &[])
+}
+
+/// Like `generate_traces`, but pre-populates the VM's RAM with `(address, value)` pairs
+/// before execution. Useful for testing load instructions without a store instruction.
+pub fn generate_traces_with_ram(program: &[u8], initial_ram: &[(u32, u32)]) -> AllTraces {
     // 1. Execute the VM.
     let mut vm = VM::new(program.to_vec());
+    for &(addr, val) in initial_ram {
+        vm.memory.insert(addr, val);
+    }
     vm.run().expect("VM execution failed");
 
     let steps = &vm.trace;
@@ -731,6 +800,21 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_bgeu = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::Bgeu { .. }));
+    let has_lw = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lw { .. }));
+    let has_lh = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lh { .. }));
+    let has_lb = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lb { .. }));
+    let has_lhu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lhu { .. }));
+    let has_lbu = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lbu { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -907,6 +991,41 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let bgeu_trace = if has_bgeu {
         Some(loquela_air::instructions::bgeu::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lw_trace = if has_lw {
+        Some(loquela_air::instructions::lw::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lh_trace = if has_lh {
+        Some(loquela_air::instructions::lh::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lb_trace = if has_lb {
+        Some(loquela_air::instructions::lb::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lhu_trace = if has_lhu {
+        Some(loquela_air::instructions::lhu::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lbu_trace = if has_lbu {
+        Some(loquela_air::instructions::lbu::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -1121,6 +1240,42 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 byte_checked_vals.push(rs1_byte3_low7);
                 let rs2_byte3_low7 = (rs2 >> 24) & 0x7F;
                 byte_checked_vals.push(rs2_byte3_low7);
+            }
+            // Load instructions: rs1_value bytes, addr bytes, loaded_val bytes.
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: ram_val, .. }, MemoryOperation::Write { .. }]
+                if matches!(
+                    s.instruction,
+                    Instruction::Lw { .. }
+                        | Instruction::Lh { .. }
+                        | Instruction::Lb { .. }
+                        | Instruction::Lhu { .. }
+                        | Instruction::Lbu { .. }
+                ) =>
+            {
+                let imm = match s.instruction {
+                    Instruction::Lw { imm, .. }
+                    | Instruction::Lh { imm, .. }
+                    | Instruction::Lb { imm, .. }
+                    | Instruction::Lhu { imm, .. }
+                    | Instruction::Lbu { imm, .. } => imm,
+                    _ => unreachable!(),
+                };
+                byte_checked_vals.push(*rs1);
+                let addr = rs1.wrapping_add(imm as u32);
+                byte_checked_vals.push(addr);
+                byte_checked_vals.push(*ram_val);
+                // LB/LH: also range-check the sign-extension helper (byte_low7 / byte1_low7).
+                match s.instruction {
+                    Instruction::Lb { .. } => {
+                        let byte0 = (*ram_val & 0xFF) as u8;
+                        byte_checked_vals.push((byte0 & 0x7F) as u32);
+                    }
+                    Instruction::Lh { .. } => {
+                        let byte1 = ((*ram_val >> 8) & 0xFF) as u8;
+                        byte_checked_vals.push((byte1 & 0x7F) as u32);
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -1350,6 +1505,21 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_bgeu {
         airs.push(LoquelAir::Bgeu(BgeuAir::new()));
     }
+    if has_lw {
+        airs.push(LoquelAir::Lw(LwAir::new()));
+    }
+    if has_lh {
+        airs.push(LoquelAir::Lh(LhAir::new()));
+    }
+    if has_lb {
+        airs.push(LoquelAir::Lb(LbAir::new()));
+    }
+    if has_lhu {
+        airs.push(LoquelAir::Lhu(LhuAir::new()));
+    }
+    if has_lbu {
+        airs.push(LoquelAir::Lbu(LbuAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -1389,6 +1559,11 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         bge: bge_trace,
         bltu: bltu_trace,
         bgeu: bgeu_trace,
+        lw: lw_trace,
+        lh: lh_trace,
+        lb: lb_trace,
+        lhu: lhu_trace,
+        lbu: lbu_trace,
     }
 }
 
