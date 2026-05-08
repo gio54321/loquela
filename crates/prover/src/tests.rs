@@ -41,6 +41,15 @@ fn encode_sll(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_srl(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b101 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -223,6 +232,52 @@ fn prove_sll_cross_byte() {
     program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
     program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (byte_shamt=1, bit_shamt=0)
     program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 8 = 256 = 0x100
+    prove(&program);
+}
+
+/// Single SRL: x3 = x1 >> x2 (basic right shift: 8 >> 3 = 1).
+#[test]
+fn prove_single_srl() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_srl(3, 1, 2)); // x3 = 8 >> 3 = 1
+    prove(&program);
+}
+
+/// SRL by zero: result equals the input (identity).
+#[test]
+fn prove_srl_by_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+                                                       // x2 = 0 (already zero), so SRL by 0 is identity
+    program.extend_from_slice(&encode_srl(3, 1, 2)); // x3 = 42 >> 0 = 42
+    prove(&program);
+}
+
+/// SRL of 0x80000000 >> 1 = 0x40000000 (logical, not arithmetic — high bit not propagated).
+#[test]
+fn prove_srl_logical_not_arithmetic() {
+    let mut program = Vec::new();
+    // Build x1 = 0x80000000: start with 1, shift left by 31.
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 31)); // x2 = 31
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 31 = 0x80000000
+                                                     // Now shift right by 1 — logical: result is 0x40000000, not 0xC0000000.
+    program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
+    program.extend_from_slice(&encode_srl(5, 3, 4)); // x5 = 0x80000000 >> 1 = 0x40000000
+    prove(&program);
+}
+
+/// SRL crossing a byte boundary (shamt=8: byte_shamt=1, bit_shamt=0).
+#[test]
+fn prove_srl_cross_byte() {
+    let mut program = Vec::new();
+    // x1 = 0x100 = 256; 256 >> 8 = 1
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 8)); // x2 = 8 (shift left 8 to get 0x100)
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 0x100
+    program.extend_from_slice(&encode_srl(4, 3, 2)); // x4 = 0x100 >> 8 = 1
     prove(&program);
 }
 
