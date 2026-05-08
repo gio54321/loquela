@@ -18,6 +18,13 @@ impl AndAir {
     }
 }
 
+impl Default for AndAir {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+
 impl<F: Field> BaseAir<F> for AndAir {
     fn width(&self) -> usize {
         1
