@@ -23,6 +23,15 @@ fn encode_xori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_and(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b111 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -122,6 +131,45 @@ fn generate_then_prove() {
     let program = encode_addi(1, 0, 42).to_vec();
     let traces = generate_traces(&program);
     prove_traces(traces);
+}
+
+/// Single AND: x3 = x1 & x2. Exercises the bytes_and bus.
+#[test]
+fn prove_single_and() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x5A)); // x1 = 0x5A
+    program.extend_from_slice(&encode_addi(2, 0, 0x3F)); // x2 = 0x3F
+    program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0x5A & 0x3F = 0x1A
+    prove(&program);
+}
+
+/// AND with a masking pattern: extract low nibbles of each byte using 0x0F0F0F0F.
+/// Loads 0x0F0F0F0F via several ADDI operations then masks a multi-byte value.
+#[test]
+fn prove_and_nibble_mask() {
+    let mut program = Vec::new();
+    // Build x1 = 0xABCD_EF12 via addi x1, x0, imm (only low 12 bits fit; use 0x012 = 18)
+    // Build x1 = 0x12 (low byte only, since ADDI is limited to 12-bit sign-extended immediates)
+    program.extend_from_slice(&encode_addi(1, 0, 0x12)); // x1 = 0x12
+                                                         // Build x2 = 0x0F (mask for low nibble)
+    program.extend_from_slice(&encode_addi(2, 0, 0x0F)); // x2 = 0x0F
+    program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0x12 & 0x0F = 0x02
+                                                     // Mask x1 again with all-bits mask (ADDI -1 = 0xFFFF_FFFF)
+    program.extend_from_slice(&encode_addi(4, 0, -1i16)); // x4 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_and(5, 1, 4)); // x5 = 0x12 & 0xFFFF_FFFF = 0x12
+    prove(&program);
+}
+
+/// Mixed ADDI + AND program verifying end-to-end with multiple AND steps.
+#[test]
+fn prove_mixed_addi_and() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+    program.extend_from_slice(&encode_addi(2, 0, 0xAA)); // x2 = 0xAA
+    program.extend_from_slice(&encode_and(3, 1, 2)); // x3 = 0xFF & 0xAA = 0xAA
+    program.extend_from_slice(&encode_addi(4, 0, 0x55)); // x4 = 0x55
+    program.extend_from_slice(&encode_and(5, 3, 4)); // x5 = 0xAA & 0x55 = 0x00
+    prove(&program);
 }
 
 // ── Negative tests ────────────────────────────────────────────────────────────
