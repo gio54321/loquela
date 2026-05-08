@@ -26,6 +26,12 @@ pub enum Instruction {
     Auipc { rd: u8, imm: i32 },
     Jal { rd: u8, imm: i32 },
     Jalr { rd: u8, rs1: u8, imm: i32 },
+    Beq { rs1: u8, rs2: u8, imm: i32 },
+    Bne { rs1: u8, rs2: u8, imm: i32 },
+    Blt { rs1: u8, rs2: u8, imm: i32 },
+    Bge { rs1: u8, rs2: u8, imm: i32 },
+    Bltu { rs1: u8, rs2: u8, imm: i32 },
+    Bgeu { rs1: u8, rs2: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -601,6 +607,58 @@ impl VM {
                 self.pc = next_pc;
                 return Ok(());
             }
+            Instruction::Beq { rs1, rs2, imm }
+            | Instruction::Bne { rs1, rs2, imm }
+            | Instruction::Blt { rs1, rs2, imm }
+            | Instruction::Bge { rs1, rs2, imm }
+            | Instruction::Bltu { rs1, rs2, imm }
+            | Instruction::Bgeu { rs1, rs2, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+
+                let taken = match &instruction {
+                    Instruction::Beq { .. } => rs1_val == rs2_val,
+                    Instruction::Bne { .. } => rs1_val != rs2_val,
+                    Instruction::Blt { .. } => (rs1_val as i32) < (rs2_val as i32),
+                    Instruction::Bge { .. } => (rs1_val as i32) >= (rs2_val as i32),
+                    Instruction::Bltu { .. } => rs1_val < rs2_val,
+                    Instruction::Bgeu { .. } => rs1_val >= rs2_val,
+                    _ => unreachable!(),
+                };
+
+                let next_pc = if taken {
+                    pc.wrapping_add(*imm as u32)
+                } else {
+                    pc.wrapping_add(4)
+                };
+
+                // Read rs1 at timestamp.
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+
+                // Read rs2 at timestamp + 1.
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+
+                self.trace.push(ExecutionStep {
+                    state: VMState { pc, registers },
+                    instruction_word,
+                    instruction,
+                    memory_ops: ops,
+                });
+                self.pc = next_pc;
+                return Ok(());
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -762,6 +820,33 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = (bytes as i32) >> 20;
             Instruction::Jalr { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b1100011 {
+            // B-type: opcode=0x63
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            let funct3 = (bytes >> 12) & 0b111;
+            // B-type immediate encoding:
+            // imm[12]  = bit 31
+            // imm[10:5]= bits 30:25
+            // imm[4:1] = bits 11:8
+            // imm[11]  = bit 7
+            // imm[0]   = 0 (always)
+            let imm12 = (bytes >> 31) & 1;
+            let imm10_5 = (bytes >> 25) & 0x3F;
+            let imm4_1 = (bytes >> 8) & 0xF;
+            let imm11 = (bytes >> 7) & 1;
+            let imm_raw = (imm12 << 12) | (imm11 << 11) | (imm10_5 << 5) | (imm4_1 << 1);
+            // Sign-extend from bit 12.
+            let imm = ((imm_raw << 19) as i32) >> 19;
+            match funct3 {
+                0b000 => Instruction::Beq { rs1, rs2, imm },
+                0b001 => Instruction::Bne { rs1, rs2, imm },
+                0b100 => Instruction::Blt { rs1, rs2, imm },
+                0b101 => Instruction::Bge { rs1, rs2, imm },
+                0b110 => Instruction::Bltu { rs1, rs2, imm },
+                0b111 => Instruction::Bgeu { rs1, rs2, imm },
+                _ => unimplemented!("unsupported B-type funct3"),
+            }
         } else {
             unimplemented!("not supported");
         }
