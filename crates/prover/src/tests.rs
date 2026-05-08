@@ -127,13 +127,7 @@ fn prove_and_verify(traces: AllTraces) -> bool {
     let config = build_config();
     let (proof, common) = do_prove(&config, &airs, &trace_vecs);
     let pvs = vec![vec![]; airs.len()];
-    match verify_batch(&config, &airs, &proof, &pvs, &common) {
-        Ok(_) => true,
-        Err(e) => {
-            eprintln!("verify_batch error: {:?}", e);
-            false
-        }
-    }
+    verify_batch(&config, &airs, &proof, &pvs, &common).is_ok()
 }
 
 fn prove_verify(program: &[u8]) {
