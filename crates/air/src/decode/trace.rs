@@ -48,6 +48,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let is_sw = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b010;
     let is_sh = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b001;
     let is_sb = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b000;
+    let is_ecall = word & 0x7F == 0b111_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 20) == 0;
+    let is_ebreak = word & 0x7F == 0b111_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 20) == 1;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
@@ -56,6 +58,8 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_sw: F::from_bool(is_sw),
         is_sh: F::from_bool(is_sh),
         is_sb: F::from_bool(is_sb),
+        is_ecall: F::from_bool(is_ecall),
+        is_ebreak: F::from_bool(is_ebreak),
     };
     row.instr_type_packed = if is_xori {
         F::ONE
@@ -67,6 +71,10 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         F::from_u64(4)
     } else if is_sb {
         F::from_u64(5)
+    } else if is_ecall {
+        F::from_u64(6)
+    } else if is_ebreak {
+        F::from_u64(7)
     } else {
         F::ZERO
     };

@@ -19,6 +19,7 @@ use loquela_air::boundaries::air::BoundariesAir;
 use loquela_air::decode::air::DecodeAir;
 use loquela_air::instructions::add::air::AddAir;
 use loquela_air::instructions::addi::air::AddiAir;
+use loquela_air::instructions::ecall::air::EcallAir;
 use loquela_air::instructions::sb::air::SbAir;
 use loquela_air::instructions::sh::air::ShAir;
 use loquela_air::instructions::sw::air::SwAir;
@@ -78,6 +79,7 @@ pub enum LoquelAir {
     Sw(SwAir),
     Sh(ShAir),
     Sb(SbAir),
+    Ecall(EcallAir),
     Memory(MemoryAir),
     Program(ProgramAir),
     Bytes(BytesAir),
@@ -98,6 +100,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Sw(a) => BaseAir::<F>::width(a),
             LoquelAir::Sh(a) => BaseAir::<F>::width(a),
             LoquelAir::Sb(a) => BaseAir::<F>::width(a),
+            LoquelAir::Ecall(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
             LoquelAir::Bytes(a) => BaseAir::<F>::width(a),
@@ -135,6 +138,7 @@ where
             LoquelAir::Sw(a) => a.eval(builder),
             LoquelAir::Sh(a) => a.eval(builder),
             LoquelAir::Sb(a) => a.eval(builder),
+            LoquelAir::Ecall(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
             LoquelAir::Bytes(a) => a.eval(builder),
@@ -157,6 +161,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sw(a) => <SwAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Sh(a) => <ShAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Sb(a) => <SbAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Ecall(a) => <EcallAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::add_lookup_columns(a),
@@ -179,6 +184,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sw(a) => <SwAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Sh(a) => <ShAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Sb(a) => <SbAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Ecall(a) => <EcallAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::get_lookups(a),
@@ -216,6 +222,8 @@ pub struct AllTraces {
     pub sh: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains SB instructions.
     pub sb: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains ECALL or EBREAK instructions.
+    pub ecall: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -238,6 +246,7 @@ impl AllTraces {
             sw,
             sh,
             sb,
+            ecall,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -266,6 +275,9 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = sb {
+            traces.push(t);
+        }
+        if let Some(t) = ecall {
             traces.push(t);
         }
         (airs, traces)
@@ -413,6 +425,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_sb = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::Sb { .. }));
+    let has_ecall = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Ecall | Instruction::Ebreak));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -462,6 +477,13 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let sb_trace = if has_sb {
         Some(loquela_air::instructions::sb::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let ecall_trace = if has_ecall {
+        Some(loquela_air::instructions::ecall::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -524,6 +546,10 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 let rs2_b = rs2.to_le_bytes();
                 individual_bytes.push(rs2_b[0]);
                 byte_checked_vals.push(*addr);
+            }
+            [] if matches!(s.instruction, Instruction::Ecall | Instruction::Ebreak) => {
+                // ECALL/EBREAK byte-checks: pc (4 bytes).
+                byte_checked_vals.push(s.state.pc);
             }
             _ => {}
         }
@@ -592,6 +618,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_sb {
         airs.push(LoquelAir::Sb(SbAir::new()));
     }
+    if has_ecall {
+        airs.push(LoquelAir::Ecall(EcallAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -610,6 +639,7 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         sw: sw_trace,
         sh: sh_trace,
         sb: sb_trace,
+        ecall: ecall_trace,
     }
 }
 

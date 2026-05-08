@@ -3,6 +3,16 @@ use p3_field::PrimeCharacteristicRing;
 
 use crate::{build_config, do_prove, generate_traces, prove, prove_traces, AllTraces, Val};
 
+fn encode_ecall() -> [u8; 4] {
+    // ECALL: opcode=0x73, funct3=0, imm=0 → 0x00000073
+    0x00000073u32.to_le_bytes()
+}
+
+fn encode_ebreak() -> [u8; 4] {
+    // EBREAK: opcode=0x73, funct3=0, imm=1 → 0x00100073
+    0x00100073u32.to_le_bytes()
+}
+
 fn encode_addi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     let word =
         ((imm as u32 & 0xFFF) << 20) | ((rs1 as u32) << 15) | ((rd as u32) << 7) | 0b001_0011;
@@ -344,4 +354,41 @@ fn negative_nonboolean_is_address_equal() {
         !prove_and_verify(traces),
         "non-boolean is_address_equal should fail verification"
     );
+}
+
+// ── ECALL / EBREAK tests ──────────────────────────────────────────────────────
+
+/// A program ending with ECALL: set x1 = 42, then halt via ECALL.
+#[test]
+fn prove_ecall_halts() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_ecall()); // halt
+    prove(&program);
+}
+
+/// A program ending with EBREAK: set x1 = 7, then halt via EBREAK.
+#[test]
+fn prove_ebreak_halts() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 7)); // x1 = 7
+    program.extend_from_slice(&encode_ebreak()); // halt
+    prove(&program);
+}
+
+/// Verify that instructions after ECALL are never executed.
+#[test]
+fn ecall_stops_execution() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_ecall()); // halt — x2 should not be written
+    program.extend_from_slice(&encode_addi(2, 0, 99)); // should NOT execute
+    let mut vm = loquela_vm::VM::new(program);
+    vm.run().unwrap();
+    let regs = vm.trace.last().unwrap().state.registers;
+    assert_eq!(regs[1], 10, "x1 should be 10");
+    assert_eq!(regs[2], 0, "x2 should be 0 (ECALL halted before addi x2)");
+    assert!(vm.halted, "VM should be halted");
+    // The trace has exactly 2 steps: addi x1 + ecall.
+    assert_eq!(vm.trace.len(), 2);
 }
