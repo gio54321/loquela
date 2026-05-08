@@ -1,6 +1,6 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use punctum_vm::{ExecutionStep, Instruction, MemoryOperation};
+use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 
 use super::air::{AddiColumns, NUM_ADDI_COLS};
 

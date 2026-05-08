@@ -1,6 +1,6 @@
+use loquela_vm::{ExecutionStep, Instruction, MemoryOperation};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::DenseMatrix;
-use punctum_vm::{ExecutionStep, Instruction, MemoryOperation};
 
 use super::air::{XoriColumns, NUM_XORI_COLS};
 

@@ -19,9 +19,9 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] LW
 - [ ] LBU
 - [ ] LHU
-- [ ] SB
-- [ ] SH
-- [ ] SW
+- [X] SB
+- [X] SH
+- [X] SW
 - [X] ADDI
 - [ ] SLTI
 - [ ] SLTIU

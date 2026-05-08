@@ -11,6 +11,9 @@ pub enum Instruction {
     AddI { rd: u8, rs1: u8, imm: i16 },
     XorI { rd: u8, rs1: u8, imm: i16 },
     Add { rd: u8, rs1: u8, rs2: u8 },
+    Sw { rs1: u8, rs2: u8, imm: i32 },
+    Sh { rs1: u8, rs2: u8, imm: i32 },
+    Sb { rs1: u8, rs2: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +177,101 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Sw { rs1, rs2, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let addr = rs1_val.wrapping_add(*imm as u32);
+                let old_ram = *self.memory.get(&addr).unwrap_or(&0);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Ram,
+                    address: addr,
+                    timestamp: self.timestamp,
+                    old_value: old_ram,
+                    new_value: rs2_val,
+                });
+                self.timestamp += 1;
+
+                self.memory.insert(addr, rs2_val);
+            }
+            Instruction::Sh { rs1, rs2, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let addr = rs1_val.wrapping_add(*imm as u32);
+                let old_ram = *self.memory.get(&addr).unwrap_or(&0);
+                let stored_val = rs2_val & 0xFFFF;
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Ram,
+                    address: addr,
+                    timestamp: self.timestamp,
+                    old_value: old_ram,
+                    new_value: stored_val,
+                });
+                self.timestamp += 1;
+
+                self.memory.insert(addr, stored_val);
+            }
+            Instruction::Sb { rs1, rs2, imm } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let addr = rs1_val.wrapping_add(*imm as u32);
+                let old_ram = *self.memory.get(&addr).unwrap_or(&0);
+                let stored_val = rs2_val & 0xFF;
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Ram,
+                    address: addr,
+                    timestamp: self.timestamp,
+                    old_value: old_ram,
+                    new_value: stored_val,
+                });
+                self.timestamp += 1;
+
+                self.memory.insert(addr, stored_val);
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -218,6 +316,22 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let rs2 = ((bytes >> 20) & 0b11111) as u8;
             Instruction::Add { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0100011 {
+            // S-type: imm[11:5] in bits 31:25, imm[4:0] in bits 11:7
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            let imm_lo = (bytes >> 7) & 0x1F;
+            let imm_hi = (bytes >> 25) & 0x7F;
+            let imm_raw = (imm_hi << 5) | imm_lo;
+            // sign-extend from bit 11
+            let imm = ((imm_raw << 20) as i32) >> 20;
+            let funct3 = (bytes >> 12) & 0b111;
+            match funct3 {
+                0b010 => Instruction::Sw { rs1, rs2, imm },
+                0b001 => Instruction::Sh { rs1, rs2, imm },
+                0b000 => Instruction::Sb { rs1, rs2, imm },
+                _ => unimplemented!("unsupported S-type funct3"),
+            }
         } else {
             unimplemented!("not supported");
         }

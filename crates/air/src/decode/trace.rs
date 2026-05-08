@@ -1,7 +1,8 @@
-use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
+use loquela_vm::ExecutionStep;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use punctum_vm::ExecutionStep;
+
+use super::air::{DecodeColumns, Instruction, NUM_DECODE_COLS};
 
 fn u32_to_limbs<F: PrimeCharacteristicRing>(v: u32) -> [F; 4] {
     let b = v.to_le_bytes();
@@ -29,25 +30,43 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let imm = ((word >> 20) & 0xFFF) as u16;
     let rs2 = ((word >> 20) & 0x1F) as u8;
 
+    // S-type immediate: bits [11:5] from inst[31:25], bits [4:0] from inst[11:7].
+    let imm_s_lo = (word >> 7) & 0x1F;
+    let imm_s_hi = (word >> 25) & 0x7F;
+    let imm_s = (imm_s_hi << 5) | imm_s_lo;
+
     row.rd = F::from_u64(rd as u64);
     row.rs1 = F::from_u64(rs1 as u64);
     row.imm = F::from_u64(imm as u64);
     row.rs2 = F::from_u64(rs2 as u64);
+    row.imm_s = F::from_u64(imm_s as u64);
 
     let is_addi = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b000;
     let is_xori = word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b100;
     let is_add =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b000 && (word >> 25) == 0b000_0000;
+    let is_sw = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b010;
+    let is_sh = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b001;
+    let is_sb = word & 0x7F == 0b010_0011 && (word >> 12) & 0x7 == 0b000;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
         is_xori: F::from_bool(is_xori),
         is_add: F::from_bool(is_add),
+        is_sw: F::from_bool(is_sw),
+        is_sh: F::from_bool(is_sh),
+        is_sb: F::from_bool(is_sb),
     };
     row.instr_type_packed = if is_xori {
         F::ONE
     } else if is_add {
         F::from_u64(2)
+    } else if is_sw {
+        F::from_u64(3)
+    } else if is_sh {
+        F::from_u64(4)
+    } else if is_sb {
+        F::from_u64(5)
     } else {
         F::ZERO
     };
