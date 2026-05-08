@@ -42,6 +42,15 @@ fn encode_ori(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_andi(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b111 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
 fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     let word = ((rs2 as u32) << 20)
         | ((rs1 as u32) << 15)
@@ -311,6 +320,43 @@ fn prove_mixed_addi_ori() {
     program.extend_from_slice(&encode_addi(1, 0, 0b1010)); // x1 = 0b1010
     program.extend_from_slice(&encode_ori(2, 1, 0b0101)); // x2 = 0b1010 | 0b0101 = 0b1111
     program.extend_from_slice(&encode_ori(3, 2, 0x00)); // x3 = 0b1111 | 0 = 0b1111
+    prove(&program);
+}
+
+/// Single ANDI: x2 = x1 & 0x0F. Exercises the bytes_and bus.
+#[test]
+fn prove_single_andi() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0xFF)); // x1 = 0xFF
+    program.extend_from_slice(&encode_andi(2, 1, 0x0F)); // x2 = 0xFF & 0x0F = 0x0F
+    prove(&program);
+}
+
+/// ANDI masking pattern: AND with 0xFF extracts the low byte.
+#[test]
+fn prove_andi_byte_mask() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_andi(2, 1, 0xFF)); // x2 = 0xFFFF_FFFF & 0xFF = 0xFF
+    prove(&program);
+}
+
+/// ANDI with a negative (sign-extended) immediate: x2 = x1 & 0xFFFF_FFFF.
+#[test]
+fn prove_andi_negative_immediate() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+    program.extend_from_slice(&encode_andi(2, 1, -1i16)); // x2 = 42 & 0xFFFF_FFFF = 42
+    prove(&program);
+}
+
+/// Mixed ADDI + ANDI program.
+#[test]
+fn prove_mixed_addi_andi() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0b1111)); // x1 = 0b1111
+    program.extend_from_slice(&encode_andi(2, 1, 0b1010)); // x2 = 0b1111 & 0b1010 = 0b1010
+    program.extend_from_slice(&encode_andi(3, 2, 0b0100)); // x3 = 0b1010 & 0b0100 = 0b0000
     prove(&program);
 }
 

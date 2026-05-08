@@ -1,6 +1,6 @@
+use loquela_vm::ExecutionStep;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use loquela_vm::ExecutionStep;
 
 use super::air::{ProgramColumns, NUM_MEMORY_COLS};
 
