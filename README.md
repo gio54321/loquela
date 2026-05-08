@@ -38,7 +38,7 @@ Yet Another RISCV zkvm on top of plonky3
 - [ ] SLTU
 - [ ] XOR
 - [X] SRL
-- [ ] SRA
+- [X] SRA
 - [ ] OR
 - [X] AND
 - [ ] ECALL
