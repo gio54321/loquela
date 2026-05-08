@@ -148,7 +148,14 @@ impl<F: Field> LookupAir<F> for MemoryAir {
 
         let mut lookups = Vec::new();
 
-        // adress must always be sorted unless the memory type is different, so we send with mult is_memory_type_equal
+        // Sortedness only matters between two real rows. Gate every cross-AIR
+        // sortedness send with (1 - next.is_padding): once we transition into
+        // padding, the addresses/timestamps are all zero and would otherwise
+        // emit spurious lookups that the U32Lt / TimestampLt AIRs don't receive.
+        let real_transition: p3_air::SymbolicExpression<F> =
+            p3_air::SymbolicExpression::from(F::ONE) - symbolic_main_next.is_padding.clone();
+
+        // address must always be sorted unless the memory type is different, so we send with mult is_memory_type_equal
         lookups.push(self.register_lookup(
             Kind::Global(String::from("u32_lt")),
             &vec![(symbolic_main_local.address.into_iter().chain(
@@ -156,7 +163,8 @@ impl<F: Field> LookupAir<F> for MemoryAir {
                         once(symbolic_main_local.is_address_equal.clone()))
                     .map(Into::into)
                     .collect::<Vec<_>>(),
-            symbolic_main_local.is_memory_type_equal.clone().into(),
+            (Into::<p3_air::SymbolicExpression<F>>::into(symbolic_main_local.is_memory_type_equal.clone())
+                * real_transition.clone()).into(),
             Direction::Send,
         )],
         ));
@@ -170,7 +178,8 @@ impl<F: Field> LookupAir<F> for MemoryAir {
                     symbolic_main_next.timestamp.clone().into(),
                     symbolic_main_local.is_timestamp_equal.clone().into(),
                 ],
-                symbolic_main_local.is_address_equal.clone().into(),
+                (Into::<p3_air::SymbolicExpression<F>>::into(symbolic_main_local.is_address_equal.clone())
+                    * real_transition).into(),
                 Direction::Send,
             )],
         ));
