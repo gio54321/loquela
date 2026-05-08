@@ -65,8 +65,16 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let is_jal = word & 0x7F == 0b110_1111;
     // JALR: I-type, opcode=0x67, funct3=0x0.
     let is_jalr = word & 0x7F == 0b110_0111 && (word >> 12) & 0x7 == 0b000;
+    // B-type instructions: opcode=0x63.
+    let is_beq = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b000;
+    let is_bne = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b001;
+    let is_blt = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b100;
+    let is_bge = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b101;
+    let is_bltu = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b110;
+    let is_bgeu = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b111;
 
     // For U-type and JAL, imm_low8 = bits 19:12 of the instruction word.
+    // B-type: imm_low8 = 0 (not used by the "decode_b" bus).
     let imm_low8 = if is_lui || is_auipc || is_jal {
         (word >> 12) & 0xFF
     } else {
@@ -93,6 +101,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_auipc: F::from_bool(is_auipc),
         is_jal: F::from_bool(is_jal),
         is_jalr: F::from_bool(is_jalr),
+        is_beq: F::from_bool(is_beq),
+        is_bne: F::from_bool(is_bne),
+        is_blt: F::from_bool(is_blt),
+        is_bge: F::from_bool(is_bge),
+        is_bltu: F::from_bool(is_bltu),
+        is_bgeu: F::from_bool(is_bgeu),
     };
     row.instr_type_packed = if is_xori {
         F::ONE
@@ -128,6 +142,18 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         F::from_u64(16)
     } else if is_jalr {
         F::from_u64(17)
+    } else if is_beq {
+        F::from_u64(18)
+    } else if is_bne {
+        F::from_u64(19)
+    } else if is_blt {
+        F::from_u64(20)
+    } else if is_bge {
+        F::from_u64(21)
+    } else if is_bltu {
+        F::from_u64(22)
+    } else if is_bgeu {
+        F::from_u64(23)
     } else {
         F::ZERO
     };
