@@ -951,3 +951,76 @@ fn prove_mixed_addi_or() {
     program.extend_from_slice(&encode_or(4, 3, 1)); // x4 = 0x7F | 0x0F = 0x7F
     prove(&program);
 }
+
+// ── LUI / AUIPC ───────────────────────────────────────────────────────────────
+
+fn encode_lui(rd: u8, imm_raw: u32) -> [u8; 4] {
+    // U-type: [imm[31:12]][rd][opcode]
+    // imm_raw is bits 31:12 of the instruction (the raw 20-bit value, NOT shifted)
+    let word = (imm_raw << 12) | ((rd as u32) << 7) | 0b011_0111;
+    word.to_le_bytes()
+}
+
+fn encode_auipc(rd: u8, imm_raw: u32) -> [u8; 4] {
+    // U-type: [imm[31:12]][rd][opcode]
+    let word = (imm_raw << 12) | ((rd as u32) << 7) | 0b001_0111;
+    word.to_le_bytes()
+}
+
+/// LUI: loads a known upper-immediate value into a register.
+/// lui x1, 0x12345  => x1 = 0x12345000
+#[test]
+fn prove_lui_basic() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // need at least one non-U-type for decode bus
+    program.extend_from_slice(&encode_lui(1, 0x12345));
+    prove(&program);
+}
+
+/// LUI with imm_raw = 1 (minimum non-zero): x1 = 0x00001000.
+#[test]
+fn prove_lui_min_imm() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(2, 0, 0));
+    program.extend_from_slice(&encode_lui(1, 1));
+    prove(&program);
+}
+
+/// LUI with imm_raw = 0xFFFFF (all bits set): x1 = 0xFFFFF000.
+#[test]
+fn prove_lui_max_imm() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(2, 0, 0));
+    program.extend_from_slice(&encode_lui(1, 0xFFFFF));
+    prove(&program);
+}
+
+/// AUIPC: PC + upper-immediate at PC != 0.
+/// First instruction is addi (PC=0), AUIPC is at PC=4.
+/// auipc x1, 1  => x1 = 4 + 0x1000 = 0x1004
+#[test]
+fn prove_auipc_nonzero_pc() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // PC=0
+    program.extend_from_slice(&encode_auipc(1, 1)); // PC=4 => x1 = 4 + 0x1000 = 0x1004
+    prove(&program);
+}
+
+/// AUIPC at PC=0: x1 = 0 + 0x5000 = 0x5000.
+#[test]
+fn prove_auipc_at_pc_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_auipc(1, 5)); // PC=0 => x1 = 0x5000
+    program.extend_from_slice(&encode_addi(2, 0, 0)); // need non-U-type
+    prove(&program);
+}
+
+/// Mixed LUI and AUIPC in the same program.
+#[test]
+fn prove_lui_and_auipc() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(3, 0, 1)); // x3 = 1 (non-U-type)
+    program.extend_from_slice(&encode_lui(1, 0xABCDE)); // x1 = 0xABCDE000
+    program.extend_from_slice(&encode_auipc(2, 0x1)); // x2 = PC + 0x1000
+    prove(&program);
+}

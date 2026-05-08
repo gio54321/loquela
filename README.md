@@ -4,8 +4,8 @@ Yet Another RISCV zkvm on top of plonky3
 
 ## RV32I Base Instruction Set coverage
 
-- [ ] LUI
-- [ ] AUIPC
+- [X] LUI
+- [X] AUIPC
 - [ ] JAL
 - [ ] JALR
 - [ ] BEQ

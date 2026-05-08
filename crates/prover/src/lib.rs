@@ -21,6 +21,8 @@ use loquela_air::instructions::add::air::AddAir;
 use loquela_air::instructions::addi::air::AddiAir;
 use loquela_air::instructions::and::air::AndInstrAir;
 use loquela_air::instructions::andi::air::AndiAir;
+use loquela_air::instructions::auipc::air::AuipcAir;
+use loquela_air::instructions::lui::air::LuiAir;
 use loquela_air::instructions::or::air::OrInstrAir;
 use loquela_air::instructions::ori::air::OriAir;
 use loquela_air::instructions::sll::air::SllAir;
@@ -121,6 +123,8 @@ pub enum LoquelAir {
     Sltu(SltuAir),
     Slti(SltiAir),
     Sltiu(SltiuAir),
+    Lui(LuiAir),
+    Auipc(AuipcAir),
 }
 
 impl<F: Field> BaseAir<F> for LoquelAir {
@@ -160,6 +164,8 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Sltu(a) => BaseAir::<F>::width(a),
             LoquelAir::Slti(a) => BaseAir::<F>::width(a),
             LoquelAir::Sltiu(a) => BaseAir::<F>::width(a),
+            LoquelAir::Lui(a) => BaseAir::<F>::width(a),
+            LoquelAir::Auipc(a) => BaseAir::<F>::width(a),
         }
     }
 
@@ -222,6 +228,8 @@ where
             LoquelAir::Sltu(a) => a.eval(builder),
             LoquelAir::Slti(a) => a.eval(builder),
             LoquelAir::Sltiu(a) => a.eval(builder),
+            LoquelAir::Lui(a) => a.eval(builder),
+            LoquelAir::Auipc(a) => a.eval(builder),
         }
     }
 }
@@ -265,6 +273,8 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sltu(a) => <SltuAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Slti(a) => <SltiAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Lui(a) => <LuiAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::add_lookup_columns(a),
         }
     }
 
@@ -304,6 +314,8 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sltu(a) => <SltuAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Slti(a) => <SltiAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Sltiu(a) => <SltiuAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Lui(a) => <LuiAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Auipc(a) => <AuipcAir as LookupAir<F>>::get_lookups(a),
         }
     }
 }
@@ -370,6 +382,10 @@ pub struct AllTraces {
     pub slti: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains SLTIU instructions (instruction AIR).
     pub sltiu: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains LUI instructions.
+    pub lui: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains AUIPC instructions.
+    pub auipc: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -411,6 +427,8 @@ impl AllTraces {
             sltu,
             slti,
             sltiu,
+            lui,
+            auipc,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -490,6 +508,12 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = sltiu {
+            traces.push(t);
+        }
+        if let Some(t) = lui {
+            traces.push(t);
+        }
+        if let Some(t) = auipc {
             traces.push(t);
         }
         (airs, traces)
@@ -694,6 +718,12 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_sltiu = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::SltiuI { .. }));
+    let has_lui = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Lui { .. }));
+    let has_auipc = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::Auipc { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -834,6 +864,20 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     };
     let sltiu_trace = if has_sltiu {
         Some(loquela_air::instructions::sltiu::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let lui_trace = if has_lui {
+        Some(loquela_air::instructions::lui::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let auipc_trace = if has_auipc {
+        Some(loquela_air::instructions::auipc::trace::build_trace::<Val>(
             steps,
         ))
     } else {
@@ -988,6 +1032,19 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
                 byte_checked_vals.push(rs1_byte3_low7);
                 let _ = rd;
+            }
+            [MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Lui { .. }) =>
+            {
+                // LUI: rd_val bytes are range-checked.
+                byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::Auipc { .. }) =>
+            {
+                // AUIPC: pc bytes and rd_val bytes are range-checked.
+                byte_checked_vals.push(s.state.pc);
+                byte_checked_vals.push(*rd);
             }
             _ => {}
         }
@@ -1269,6 +1326,12 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_sltiu {
         airs.push(LoquelAir::Sltiu(SltiuAir::new()));
     }
+    if has_lui {
+        airs.push(LoquelAir::Lui(LuiAir::new()));
+    }
+    if has_auipc {
+        airs.push(LoquelAir::Auipc(AuipcAir::new()));
+    }
 
     AllTraces {
         airs,
@@ -1306,6 +1369,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         sltu: sltu_trace,
         slti: slti_trace,
         sltiu: sltiu_trace,
+        lui: lui_trace,
+        auipc: auipc_trace,
     }
 }
 

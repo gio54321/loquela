@@ -27,6 +27,8 @@ pub enum Instruction {
     Sltu { rd: u8, rs1: u8, rs2: u8 },
     SltiI { rd: u8, rs1: u8, imm: i32 },
     SltiuI { rd: u8, rs1: u8, imm: i32 },
+    Lui { rd: u8, imm: i32 },
+    Auipc { rd: u8, imm: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -642,6 +644,39 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Lui { rd, imm } => {
+                let old_rd = registers[*rd as usize];
+                // imm is the raw upper-20 bits (inst >> 12); shift left 12 to get value
+                let result = (*imm as u32) << 12;
+
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
+            Instruction::Auipc { rd, imm } => {
+                let old_rd = registers[*rd as usize];
+                // imm is the raw upper-20 bits (inst >> 12); shift left 12 and add PC
+                let imm_u = (*imm as u32) << 12;
+                let result = pc.wrapping_add(imm_u);
+
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -802,6 +837,18 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let imm = (bytes as i32) >> 20;
             Instruction::SltiuI { rd, rs1, imm }
+        } else if bytes & 0b1111111 == 0b0110111 {
+            // LUI: U-type, opcode=0x37
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            // imm is the raw upper-20 bits (bits 31:12), NOT yet shifted
+            let imm = ((bytes as i32) >> 12) & 0xF_FFFF;
+            Instruction::Lui { rd, imm }
+        } else if bytes & 0b1111111 == 0b0010111 {
+            // AUIPC: U-type, opcode=0x17
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            // imm is the raw upper-20 bits (bits 31:12), NOT yet shifted
+            let imm = ((bytes as i32) >> 12) & 0xF_FFFF;
+            Instruction::Auipc { rd, imm }
         } else {
             unimplemented!("not supported");
         }
