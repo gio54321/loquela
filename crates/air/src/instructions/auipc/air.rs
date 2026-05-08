@@ -20,7 +20,7 @@ use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 ///   - Receives `(pc[0..4], timestamp)` from the "trace" bus.
 ///   - Sends `(InstructionId::Auipc, rd, imm_high12, imm_low8)` to the "decode_u" bus.
 ///   - Sends one write to the "memory" bus: write rd = rd_val = pc + imm_u.
-///   - Sends eight byte-range tuples to the "bytes" bus (pc bytes and rd_val bytes).
+///   - Sends eleven byte-range tuples to the "bytes" bus (pc bytes, imm_u[1..3], and rd_val bytes).
 ///   - Sends `(next_pc[0..4], timestamp + 1)` to the "trace" bus.
 ///
 /// AIR constraints verify:
@@ -223,6 +223,17 @@ impl<F: Field> LookupAir<F> for AuipcAir {
             self.register_lookup(
                 Kind::Global(String::from("bytes")),
                 &vec![(vec![byte.into()], F::ONE.into(), Direction::Send)],
+            )
+        }));
+
+        // Byte range-checks for imm_u[1..3]: required for u32_add soundness.
+        // imm_u[0] is already constrained to zero; bytes 1–3 must be in [0, 255]
+        // so the decomposition equation has a unique solution and the carry chain
+        // cannot be manipulated via out-of-range intermediate values.
+        lookups.extend(local.imm_u[1..].iter().map(|byte| {
+            self.register_lookup(
+                Kind::Global(String::from("bytes")),
+                &vec![(vec![(*byte).into()], F::ONE.into(), Direction::Send)],
             )
         }));
 

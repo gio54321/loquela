@@ -4,6 +4,7 @@ pub mod byte_less_than_lookup;
 pub mod byte_lookup;
 pub mod byte_shift_left_lookup;
 pub mod byte_shift_right_lookup;
+pub mod or_lookup;
 pub mod timestamp_less_than;
 pub mod types;
 pub mod u32_less_than_lookup;
