@@ -28,9 +28,9 @@ Yet Another RISCV zkvm on top of plonky3
 - [X] XORI
 - [X] ORI
 - [X] ANDI
-- [ ] SLLI
-- [ ] SRLI
-- [ ] SRAI
+- [X] SLLI
+- [X] SRLI
+- [X] SRAI
 - [X] ADD
 - [X] SUB
 - [X] SLL

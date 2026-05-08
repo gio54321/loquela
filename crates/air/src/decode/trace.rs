@@ -54,6 +54,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b101 && (word >> 25) == 0b000_0000;
     let is_sra =
         word & 0x7F == 0b011_0011 && (word >> 12) & 0x7 == 0b101 && (word >> 25) == 0b010_0000;
+    let is_slli =
+        word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b001 && (word >> 25) == 0b000_0000;
+    let is_srli =
+        word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b101 && (word >> 25) == 0b000_0000;
+    let is_srai =
+        word & 0x7F == 0b001_0011 && (word >> 12) & 0x7 == 0b101 && (word >> 25) == 0b010_0000;
 
     row.instr_type = Instruction {
         is_addi: F::from_bool(is_addi),
@@ -68,6 +74,9 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_sll: F::from_bool(is_sll),
         is_srl: F::from_bool(is_srl),
         is_sra: F::from_bool(is_sra),
+        is_slli: F::from_bool(is_slli),
+        is_srli: F::from_bool(is_srli),
+        is_srai: F::from_bool(is_srai),
     };
     row.instr_type_packed = if is_xori {
         F::from_u64(InstructionId::Xori as u64)
@@ -91,6 +100,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         F::from_u64(InstructionId::Srl as u64)
     } else if is_sra {
         F::from_u64(InstructionId::Sra as u64)
+    } else if is_slli {
+        F::from_u64(InstructionId::Slli as u64)
+    } else if is_srli {
+        F::from_u64(InstructionId::Srli as u64)
+    } else if is_srai {
+        F::from_u64(InstructionId::Srai as u64)
     } else {
         F::from_u64(InstructionId::Addi as u64)
     };

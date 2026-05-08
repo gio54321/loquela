@@ -24,8 +24,11 @@ use loquela_air::instructions::andi::air::AndiAir;
 use loquela_air::instructions::or::air::OrInstrAir;
 use loquela_air::instructions::ori::air::OriAir;
 use loquela_air::instructions::sll::air::SllAir;
+use loquela_air::instructions::slli::air::SlliAir;
 use loquela_air::instructions::sra::air::SraAir;
+use loquela_air::instructions::srai::air::SraiAir;
 use loquela_air::instructions::srl::air::SrlAir;
+use loquela_air::instructions::srli::air::SrliAir;
 use loquela_air::instructions::sub::air::SubAir;
 use loquela_air::instructions::xor::air::XorInstrAir;
 use loquela_air::instructions::xori::air::XoriAir;
@@ -93,6 +96,9 @@ pub enum LoquelAir {
     Sll(SllAir),
     Srl(SrlAir),
     Sra(SraAir),
+    Slli(SlliAir),
+    Srli(SrliAir),
+    Srai(SraiAir),
     OrInstr(OrInstrAir),
     Memory(MemoryAir),
     Program(ProgramAir),
@@ -125,6 +131,9 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Sll(a) => BaseAir::<F>::width(a),
             LoquelAir::Srl(a) => BaseAir::<F>::width(a),
             LoquelAir::Sra(a) => BaseAir::<F>::width(a),
+            LoquelAir::Slli(a) => BaseAir::<F>::width(a),
+            LoquelAir::Srli(a) => BaseAir::<F>::width(a),
+            LoquelAir::Srai(a) => BaseAir::<F>::width(a),
             LoquelAir::OrInstr(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
@@ -180,6 +189,9 @@ where
             LoquelAir::Sll(a) => a.eval(builder),
             LoquelAir::Srl(a) => a.eval(builder),
             LoquelAir::Sra(a) => a.eval(builder),
+            LoquelAir::Slli(a) => a.eval(builder),
+            LoquelAir::Srli(a) => a.eval(builder),
+            LoquelAir::Srai(a) => a.eval(builder),
             LoquelAir::OrInstr(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
@@ -214,6 +226,9 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Srl(a) => <SrlAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Sra(a) => <SraAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Slli(a) => <SlliAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Srli(a) => <SrliAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Srai(a) => <SraiAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
@@ -248,6 +263,9 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Sll(a) => <SllAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Srl(a) => <SrlAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Sra(a) => <SraAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Slli(a) => <SlliAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Srli(a) => <SrliAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Srai(a) => <SraiAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
@@ -314,6 +332,12 @@ pub struct AllTraces {
     pub byte_srl: Option<RowMajorMatrix<Val>>,
     /// Present when the program contains SRA instructions (instruction AIR).
     pub sra: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SLLI instructions (instruction AIR).
+    pub slli: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SRLI instructions (instruction AIR).
+    pub srli: Option<RowMajorMatrix<Val>>,
+    /// Present when the program contains SRAI instructions (instruction AIR).
+    pub srai: Option<RowMajorMatrix<Val>>,
 }
 
 impl AllTraces {
@@ -348,6 +372,9 @@ impl AllTraces {
             srl,
             byte_srl,
             sra,
+            slli,
+            srli,
+            srai,
         } = self;
         let mut traces = vec![
             boundaries,
@@ -406,6 +433,15 @@ impl AllTraces {
             traces.push(t);
         }
         if let Some(t) = sra {
+            traces.push(t);
+        }
+        if let Some(t) = slli {
+            traces.push(t);
+        }
+        if let Some(t) = srli {
+            traces.push(t);
+        }
+        if let Some(t) = srai {
             traces.push(t);
         }
         (airs, traces)
@@ -589,6 +625,15 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     let has_sra = steps
         .iter()
         .any(|s| matches!(s.instruction, Instruction::Sra { .. }));
+    let has_slli = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::SlliI { .. }));
+    let has_srli = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::SrliI { .. }));
+    let has_srai = steps
+        .iter()
+        .any(|s| matches!(s.instruction, Instruction::SraiI { .. }));
 
     // 3. Build traces.
     println!("Building AIR instances and traces...");
@@ -685,6 +730,27 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     } else {
         None
     };
+    let slli_trace = if has_slli {
+        Some(loquela_air::instructions::slli::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let srli_trace = if has_srli {
+        Some(loquela_air::instructions::srli::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
+    let srai_trace = if has_srai {
+        Some(loquela_air::instructions::srai::trace::build_trace::<Val>(
+            steps,
+        ))
+    } else {
+        None
+    };
 
     let memory = loquela_air::memory::trace::build_trace::<Val>(&all_ops);
 
@@ -759,6 +825,27 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 let rs2_shamt_high = (*rs2 & 0xFF) >> 5;
                 byte_checked_vals.push(rs2_shamt_high);
                 // rs1_byte3_low7: low 7 bits of rs1's high byte
+                let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
+                byte_checked_vals.push(rs1_byte3_low7);
+            }
+            [MemoryOperation::Read { .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::SlliI { .. }) =>
+            {
+                // SLLI: rd bytes are range-checked; rs1 bytes covered by byte_sll lookup.
+                byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Read { .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::SrliI { .. }) =>
+            {
+                // SRLI: rd bytes are range-checked; rs1 bytes covered by byte_srl lookup.
+                byte_checked_vals.push(*rd);
+            }
+            [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Write { new_value: rd, .. }]
+                if matches!(s.instruction, Instruction::SraiI { .. }) =>
+            {
+                // SRAI: rd bytes and rs1_byte3_low7 are range-checked;
+                // rs1 bytes covered by byte_srl lookup.
+                byte_checked_vals.push(*rd);
                 let rs1_byte3_low7 = (rs1 >> 24) & 0x7F;
                 byte_checked_vals.push(rs1_byte3_low7);
             }
@@ -878,26 +965,38 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         None
     };
 
-    // Compute byte_sll multiplicities for SLL instructions.
-    // For each SLL step, we emit 4 lookups: (rs1_bytes[i], bit_shamt, shifted, carry).
+    // Compute byte_sll multiplicities for SLL and SLLI instructions.
+    // For each SLL/SLLI step, we emit 4 lookups: (rs1_bytes[i], bit_shamt, shifted, carry).
     // Row index in the byte_sll table = byte_val * 8 + bit_shamt.
-    let byte_sll_prim_trace = if has_sll {
+    let byte_sll_prim_trace = if has_sll || has_slli {
         let mut byte_sll_mults = vec![Val::ZERO; 256 * 8];
         for s in steps.iter() {
-            if !matches!(s.instruction, Instruction::Sll { .. }) {
-                continue;
-            }
-            if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, ..] =
-                s.memory_ops.as_slice()
-            {
-                let shamt = rs2 & 0x1F;
-                let bit_shamt = (shamt % 8) as usize;
-                let rs1_b = rs1.to_le_bytes();
-                for i in 0..4 {
-                    let byte_val = rs1_b[i] as usize;
-                    let row = byte_val * 8 + bit_shamt;
-                    byte_sll_mults[row] += Val::ONE;
+            let (rs1_val, shamt) = match &s.instruction {
+                Instruction::Sll { .. } => {
+                    if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, ..] =
+                        s.memory_ops.as_slice()
+                    {
+                        (*rs1, *rs2 & 0x1F)
+                    } else {
+                        continue;
+                    }
                 }
+                Instruction::SlliI { imm, .. } => {
+                    if let [MemoryOperation::Read { value: rs1, .. }, ..] = s.memory_ops.as_slice()
+                    {
+                        (*rs1, (*imm & 0x1F) as u32)
+                    } else {
+                        continue;
+                    }
+                }
+                _ => continue,
+            };
+            let bit_shamt = (shamt % 8) as usize;
+            let rs1_b = rs1_val.to_le_bytes();
+            for i in 0..4 {
+                let byte_val = rs1_b[i] as usize;
+                let row = byte_val * 8 + bit_shamt;
+                byte_sll_mults[row] += Val::ONE;
             }
         }
         Some(loquela_air::primitives::byte_shift_left_lookup::build_trace::<Val>(&byte_sll_mults))
@@ -905,29 +1004,38 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         None
     };
 
-    // Compute byte_srl multiplicities for SRL and SRA instructions.
-    // For each SRL/SRA step, we emit 4 lookups: (rs1_bytes[i], bit_shamt, shifted, carry).
+    // Compute byte_srl multiplicities for SRL, SRA, SRLI, and SRAI instructions.
+    // For each such step, we emit 4 lookups: (rs1_bytes[i], bit_shamt, shifted, carry).
     // Row index in the byte_srl table = byte_val * 8 + bit_shamt.
-    let byte_srl_prim_trace = if has_srl || has_sra {
+    let byte_srl_prim_trace = if has_srl || has_sra || has_srli || has_srai {
         let mut byte_srl_mults = vec![Val::ZERO; 256 * 8];
         for s in steps.iter() {
-            if !matches!(
-                s.instruction,
-                Instruction::Srl { .. } | Instruction::Sra { .. }
-            ) {
-                continue;
-            }
-            if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, ..] =
-                s.memory_ops.as_slice()
-            {
-                let shamt = rs2 & 0x1F;
-                let bit_shamt = (shamt % 8) as usize;
-                let rs1_b = rs1.to_le_bytes();
-                for i in 0..4 {
-                    let byte_val = rs1_b[i] as usize;
-                    let row = byte_val * 8 + bit_shamt;
-                    byte_srl_mults[row] += Val::ONE;
+            let (rs1_val, shamt) = match &s.instruction {
+                Instruction::Srl { .. } | Instruction::Sra { .. } => {
+                    if let [MemoryOperation::Read { value: rs1, .. }, MemoryOperation::Read { value: rs2, .. }, ..] =
+                        s.memory_ops.as_slice()
+                    {
+                        (*rs1, *rs2 & 0x1F)
+                    } else {
+                        continue;
+                    }
                 }
+                Instruction::SrliI { imm, .. } | Instruction::SraiI { imm, .. } => {
+                    if let [MemoryOperation::Read { value: rs1, .. }, ..] = s.memory_ops.as_slice()
+                    {
+                        (*rs1, (*imm & 0x1F) as u32)
+                    } else {
+                        continue;
+                    }
+                }
+                _ => continue,
+            };
+            let bit_shamt = (shamt % 8) as usize;
+            let rs1_b = rs1_val.to_le_bytes();
+            for i in 0..4 {
+                let byte_val = rs1_b[i] as usize;
+                let row = byte_val * 8 + bit_shamt;
+                byte_srl_mults[row] += Val::ONE;
             }
         }
         Some(loquela_air::primitives::byte_shift_right_lookup::build_trace::<Val>(&byte_srl_mults))
@@ -987,16 +1095,27 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     }
     if has_sll {
         airs.push(LoquelAir::Sll(SllAir::new()));
+    }
+    if has_sll || has_slli {
         airs.push(LoquelAir::ByteSll(ByteShiftLeftAir::new()));
     }
     if has_srl {
         airs.push(LoquelAir::Srl(SrlAir::new()));
     }
-    if has_srl || has_sra {
+    if has_srl || has_sra || has_srli || has_srai {
         airs.push(LoquelAir::ByteSrl(ByteShiftRightAir::new()));
     }
     if has_sra {
         airs.push(LoquelAir::Sra(SraAir::new()));
+    }
+    if has_slli {
+        airs.push(LoquelAir::Slli(SlliAir::new()));
+    }
+    if has_srli {
+        airs.push(LoquelAir::Srli(SrliAir::new()));
+    }
+    if has_srai {
+        airs.push(LoquelAir::Srai(SraiAir::new()));
     }
 
     AllTraces {
@@ -1028,6 +1147,9 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         srl: srl_trace,
         byte_srl: byte_srl_prim_trace,
         sra: sra_trace,
+        slli: slli_trace,
+        srli: srli_trace,
+        srai: srai_trace,
     }
 }
 
