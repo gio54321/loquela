@@ -456,6 +456,190 @@ fn prove_srai_sign_extension() {
     prove(&program);
 }
 
+/// SLTU rd, rs1, rs2  — R-type, opcode=0x33, funct3=0x3, funct7=0x00
+fn encode_sltu(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b011 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
+/// SLT rd, rs1, rs2  — R-type, opcode=0x33, funct3=0x2, funct7=0x00
+fn encode_slt(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b010 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
+/// SLTI rd, rs1, imm  — I-type, opcode=0x13, funct3=0x2
+fn encode_slti(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b010 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+/// SLTIU rd, rs1, imm  — I-type, opcode=0x13, funct3=0x3
+fn encode_sltiu(rd: u8, rs1: u8, imm: i16) -> [u8; 4] {
+    let word = ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b011 << 12)
+        | ((rd as u32) << 7)
+        | 0b001_0011;
+    word.to_le_bytes()
+}
+
+/// SLTU: 1 < 2 = 1 (unsigned).
+#[test]
+fn prove_sltu_less() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 2)); // x2 = 2
+    program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (1 < 2) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTU: 2 < 1 = 0 (unsigned).
+#[test]
+fn prove_sltu_not_less() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 2)); // x1 = 2
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (2 < 1) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLTU: equal values give 0.
+#[test]
+fn prove_sltu_equal() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 5)); // x2 = 5
+    program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (5 < 5) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLTU: 0 < 0xFFFFFFFF = 1 (unsigned wrapping boundary: -1 is very large unsigned).
+#[test]
+fn prove_sltu_wrapping_boundary() {
+    let mut program = Vec::new();
+    // x1 = 0 (already zero)
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (0 < 0xFFFF_FFFF) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTU: 0xFFFFFFFF < 0 = 0 (0xFFFFFFFF is the largest unsigned value).
+#[test]
+fn prove_sltu_wrapping_boundary_reversed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = 0xFFFF_FFFF
+                                                          // x2 = 0 (already zero)
+    program.extend_from_slice(&encode_sltu(3, 1, 2)); // x3 = (0xFFFF_FFFF < 0) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLT: positive < negative = 0 (signed: 1 is not less than -1).
+#[test]
+fn prove_slt_positive_vs_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1 (positive)
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1 (negative)
+    program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (1 < -1 signed) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLT: negative < positive = 1 (signed: -1 is less than 1).
+#[test]
+fn prove_slt_negative_vs_positive() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1 (negative)
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1 (positive)
+    program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (-1 < 1 signed) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLT: both negative, -2 < -1 = 1 (signed).
+#[test]
+fn prove_slt_both_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -2i16)); // x1 = -2
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1
+    program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (-2 < -1 signed) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLT: equal values give 0.
+#[test]
+fn prove_slt_equal() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 7)); // x1 = 7
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_slt(3, 1, 2)); // x3 = (7 < 7 signed) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLTI: rs1=3, imm=5 → 1 (3 < 5 signed).
+#[test]
+fn prove_slti_less() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 3)); // x1 = 3
+    program.extend_from_slice(&encode_slti(2, 1, 5)); // x2 = (3 < 5) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTI: rs1=-1, imm=0 → 1 (-1 < 0 signed, sign-extended imm).
+#[test]
+fn prove_slti_negative_rs1() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_slti(2, 1, 0)); // x2 = (-1 < 0) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTI: rs1=5, imm=-1 → 0 (5 is not less than -1 signed).
+#[test]
+fn prove_slti_positive_vs_neg_imm() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_slti(2, 1, -1i16)); // x2 = (5 < -1 signed) ? 1 : 0 = 0
+    prove(&program);
+}
+
+/// SLTIU: rs1=3, imm=5 → 1 (3 < 5 unsigned, positive imm).
+#[test]
+fn prove_sltiu_less() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 3)); // x1 = 3
+    program.extend_from_slice(&encode_sltiu(2, 1, 5)); // x2 = (3 < 5 unsigned) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTIU: rs1=0, imm=-1 → 1 (0 < 0xFFFF_FFFF unsigned; -1 sign-extended = 0xFFFF_FFFF).
+#[test]
+fn prove_sltiu_zero_vs_max() {
+    let mut program = Vec::new();
+    // x1 = 0 (already zero)
+    program.extend_from_slice(&encode_sltiu(2, 1, -1i16)); // x2 = (0 < 0xFFFF_FFFF) ? 1 : 0 = 1
+    prove(&program);
+}
+
+/// SLTIU: rs1=5, imm=5 → 0 (equal values, unsigned).
+#[test]
+fn prove_sltiu_equal() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_sltiu(2, 1, 5)); // x2 = (5 < 5 unsigned) ? 1 : 0 = 0
+    prove(&program);
+}
+
 // ── Negative tests ────────────────────────────────────────────────────────────
 //
 // Each test corrupts one field in an otherwise-valid witness and asserts
