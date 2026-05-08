@@ -19,6 +19,8 @@ pub struct Instruction<F> {
     pub is_sw: F,
     pub is_sh: F,
     pub is_sb: F,
+    pub is_ecall: F,
+    pub is_ebreak: F,
 }
 
 #[repr(u8)]
@@ -29,6 +31,8 @@ pub enum InstructionId {
     Sw = 3,
     Sh = 4,
     Sb = 5,
+    Ecall = 6,
+    Ebreak = 7,
 }
 
 #[repr(C)]
@@ -112,13 +116,17 @@ where
         builder.assert_bool(local.instr_type.is_sw.clone());
         builder.assert_bool(local.instr_type.is_sh.clone());
         builder.assert_bool(local.instr_type.is_sb.clone());
+        builder.assert_bool(local.instr_type.is_ecall.clone());
+        builder.assert_bool(local.instr_type.is_ebreak.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
                 + local.instr_type.is_add.clone()
                 + local.instr_type.is_sw.clone()
                 + local.instr_type.is_sh.clone()
-                + local.instr_type.is_sb.clone(),
+                + local.instr_type.is_sb.clone()
+                + local.instr_type.is_ecall.clone()
+                + local.instr_type.is_ebreak.clone(),
             AB::Expr::ONE,
         );
 
@@ -227,6 +235,35 @@ where
             when_sb.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
         }
 
+        // ECALL and EBREAK share opcode 0b1110011 and funct3 0b000.
+        let is_ecall_or_ebreak: AB::Expr =
+            local.instr_type.is_ecall.clone() + local.instr_type.is_ebreak.clone();
+
+        // Opcode (bits 0..7) == 0b1110011 for ECALL/EBREAK (SYSTEM).
+        let mut when_system = builder.when(is_ecall_or_ebreak.clone());
+        for i in 0..7 {
+            let expected = if (0b1110011u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_system.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+
+        // ECALL/EBREAK: funct3 == 0b000
+        let mut when_system = builder.when(is_ecall_or_ebreak);
+        for i in 0..3 {
+            when_system.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
+        }
+
+        // ECALL: imm == 0 — bit 20 (decompositions[2][4]) == 0.
+        let mut when_ecall = builder.when(local.instr_type.is_ecall.clone());
+        when_ecall.assert_eq(local.decompositions[2][4].clone(), AB::Expr::ZERO);
+
+        // EBREAK: imm == 1 — bit 20 (decompositions[2][4]) == 1.
+        let mut when_ebreak = builder.when(local.instr_type.is_ebreak.clone());
+        when_ebreak.assert_eq(local.decompositions[2][4].clone(), AB::Expr::ONE);
+
         // rd = bits 7..12 (1 bit in byte 0, 4 bits in byte 1).
         let rd_expr = pack_bits::<AB, 4>(
             &local.decompositions,
@@ -302,13 +339,15 @@ where
         );
         builder.assert_eq(local.imm_s.clone(), imm_s_expr);
 
-        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=SW, 4=SH, 5=SB.
+        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=SW, 4=SH, 5=SB, 6=ECALL, 7=EBREAK.
         let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
             + local.instr_type.is_xori.clone() * AB::Expr::ONE
             + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(2))
             + local.instr_type.is_sw.clone() * AB::Expr::from(AB::F::from_u32(3))
             + local.instr_type.is_sh.clone() * AB::Expr::from(AB::F::from_u32(4))
-            + local.instr_type.is_sb.clone() * AB::Expr::from(AB::F::from_u32(5));
+            + local.instr_type.is_sb.clone() * AB::Expr::from(AB::F::from_u32(5))
+            + local.instr_type.is_ecall.clone() * AB::Expr::from(AB::F::from_u32(6))
+            + local.instr_type.is_ebreak.clone() * AB::Expr::from(AB::F::from_u32(7));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
