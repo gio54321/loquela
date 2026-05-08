@@ -8,24 +8,23 @@ use std::vec;
 const NUM_PREPROCESSED_ROWS: usize = 256 * 256;
 
 #[derive(Clone)]
-pub struct AndAir {
+pub struct OrAir {
     num_lookups: usize,
 }
 
-impl AndAir {
+impl OrAir {
     pub fn new() -> Self {
         Self { num_lookups: 0 }
     }
 }
 
-impl Default for AndAir {
+impl Default for OrAir {
     fn default() -> Self {
         Self::new()
     }
 }
 
-
-impl<F: Field> BaseAir<F> for AndAir {
+impl<F: Field> BaseAir<F> for OrAir {
     fn width(&self) -> usize {
         1
     }
@@ -44,14 +43,14 @@ impl<F: Field> BaseAir<F> for AndAir {
             for y in 0..256 {
                 data.push(bytes_f[x]);
                 data.push(bytes_f[y]);
-                data.push(bytes_f[x & y]);
+                data.push(bytes_f[x | y]);
             }
         }
         Some(RowMajorMatrix::new(data, 3))
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for AndAir
+impl<AB: AirBuilder> Air<AB> for OrAir
 where
     AB::MainWindow: WindowAccess<AB::Var>,
     <AB as AirBuilder>::F: Field,
@@ -59,7 +58,7 @@ where
     fn eval(&self, _builder: &mut AB) {}
 }
 
-impl<F: Field> LookupAir<F> for AndAir {
+impl<F: Field> LookupAir<F> for OrAir {
     fn add_lookup_columns(&mut self) -> Vec<usize> {
         let new_idx = self.num_lookups;
         self.num_lookups += 1;
@@ -79,7 +78,7 @@ impl<F: Field> LookupAir<F> for AndAir {
         let symbolic_preprocessed_local = symbolic_air_builder.preprocessed().current_slice();
 
         vec![self.register_lookup(
-            Kind::Global(String::from("bytes_and")),
+            Kind::Global(String::from("bytes_or")),
             &vec![(
                 vec![
                     symbolic_preprocessed_local[0].into(),
@@ -93,10 +92,10 @@ impl<F: Field> LookupAir<F> for AndAir {
     }
 }
 
-/// Build the main trace for `AndAir`.
+/// Build the main trace for `OrAir`.
 ///
 /// `multiplicities[i]` is the count for preprocessed row `i`, which holds
-/// `(x, y, x & y)` ordered as: `for x in 0..256 { for y in 0..256 { ... } }`,
+/// `(x, y, x | y)` ordered as: `for x in 0..256 { for y in 0..256 { ... } }`,
 /// i.e. row index = `x * 256 + y`.
 ///
 /// The slice must have exactly `NUM_PREPROCESSED_ROWS` = 65536 elements.
@@ -104,7 +103,7 @@ pub fn build_trace<F: Field>(multiplicities: &[F]) -> RowMajorMatrix<F> {
     assert_eq!(
         multiplicities.len(),
         NUM_PREPROCESSED_ROWS,
-        "AndAir requires exactly {NUM_PREPROCESSED_ROWS} multiplicities"
+        "OrAir requires exactly {NUM_PREPROCESSED_ROWS} multiplicities"
     );
     RowMajorMatrix::new(multiplicities.to_vec(), 1)
 }
