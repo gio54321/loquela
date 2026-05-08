@@ -13,6 +13,7 @@ pub enum Instruction {
     Add { rd: u8, rs1: u8, rs2: u8 },
     And { rd: u8, rs1: u8, rs2: u8 },
     Sll { rd: u8, rs1: u8, rs2: u8 },
+    Srl { rd: u8, rs1: u8, rs2: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -239,6 +240,38 @@ impl VM {
 
                 registers[*rd as usize] = result;
             }
+            Instruction::Srl { rd, rs1, rs2 } => {
+                let rs1_val = registers[*rs1 as usize];
+                let rs2_val = registers[*rs2 as usize];
+                let old_rd = registers[*rd as usize];
+                let shamt = rs2_val & 0x1F;
+                let result = rs1_val.wrapping_shr(shamt);
+
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs1 as u32,
+                    timestamp: self.timestamp,
+                    value: rs1_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Read {
+                    memory_type: MemoryType::Register,
+                    address: *rs2 as u32,
+                    timestamp: self.timestamp,
+                    value: rs2_val,
+                });
+                self.timestamp += 1;
+                ops.push(MemoryOperation::Write {
+                    memory_type: MemoryType::Register,
+                    address: *rd as u32,
+                    timestamp: self.timestamp,
+                    old_value: old_rd,
+                    new_value: result,
+                });
+                self.timestamp += 1;
+
+                registers[*rd as usize] = result;
+            }
         }
 
         self.trace.push(ExecutionStep {
@@ -299,6 +332,14 @@ impl VM {
             let rs1 = ((bytes >> 15) & 0b11111) as u8;
             let rs2 = ((bytes >> 20) & 0b11111) as u8;
             Instruction::Sll { rd, rs1, rs2 }
+        } else if bytes & 0b1111111 == 0b0110011
+            && (bytes >> 12) & 0b111 == 0b101
+            && (bytes >> 25) == 0b0000000
+        {
+            let rd = ((bytes >> 7) & 0b11111) as u8;
+            let rs1 = ((bytes >> 15) & 0b11111) as u8;
+            let rs2 = ((bytes >> 20) & 0b11111) as u8;
+            Instruction::Srl { rd, rs1, rs2 }
         } else {
             unimplemented!("not supported");
         }
