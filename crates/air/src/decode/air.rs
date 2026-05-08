@@ -20,6 +20,9 @@ pub struct Instruction<F> {
     pub is_sll: F,
     pub is_srl: F,
     pub is_sra: F,
+    pub is_slli: F,
+    pub is_srli: F,
+    pub is_srai: F,
 }
 
 #[repr(u8)]
@@ -31,6 +34,9 @@ pub enum InstructionId {
     Sll = 4,
     Srl = 5,
     Sra = 6,
+    Slli = 7,
+    Srli = 8,
+    Srai = 9,
 }
 
 #[repr(C)]
@@ -112,6 +118,9 @@ where
         builder.assert_bool(local.instr_type.is_sll.clone());
         builder.assert_bool(local.instr_type.is_srl.clone());
         builder.assert_bool(local.instr_type.is_sra.clone());
+        builder.assert_bool(local.instr_type.is_slli.clone());
+        builder.assert_bool(local.instr_type.is_srli.clone());
+        builder.assert_bool(local.instr_type.is_srai.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
@@ -119,7 +128,10 @@ where
                 + local.instr_type.is_and.clone()
                 + local.instr_type.is_sll.clone()
                 + local.instr_type.is_srl.clone()
-                + local.instr_type.is_sra.clone(),
+                + local.instr_type.is_sra.clone()
+                + local.instr_type.is_slli.clone()
+                + local.instr_type.is_srli.clone()
+                + local.instr_type.is_srai.clone(),
             AB::Expr::ONE,
         );
 
@@ -128,9 +140,14 @@ where
             check_bit_decomposition(builder, limb.clone(), &local.decompositions[i]);
         }
 
-        // Opcode (bits 0..7) == 0b0010011 for ADDI and XORI (I-type).
-        let mut when_op_immediate =
-            builder.when(local.instr_type.is_addi.clone() + local.instr_type.is_xori.clone());
+        // Opcode (bits 0..7) == 0b0010011 for ADDI, XORI, SLLI, SRLI, SRAI (I-type).
+        let mut when_op_immediate = builder.when(
+            local.instr_type.is_addi.clone()
+                + local.instr_type.is_xori.clone()
+                + local.instr_type.is_slli.clone()
+                + local.instr_type.is_srli.clone()
+                + local.instr_type.is_srai.clone(),
+        );
         for i in 0..7 {
             let expected = if (0b0010011u32 >> i) & 1 == 1 {
                 AB::Expr::ONE
@@ -262,6 +279,62 @@ where
         let mut when_sra = builder.when(local.instr_type.is_sra.clone());
         when_sra.assert_eq(local.decompositions[3][7].clone(), AB::Expr::ZERO);
 
+        // SLLI: funct3 == 0b001, imm[11:5] == 0b0000000 (bits 25..32 all zero).
+        // funct3 = bits 12..15 = bits 4..7 of byte 1.
+        let mut when_slli = builder.when(local.instr_type.is_slli.clone());
+        for i in 0..3 {
+            let expected = if (0b001u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_slli.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+        // imm[11:5] == 0 means bits 25..32 of the instruction word = bits 1..7 of byte 3.
+        // For SLLI this is 0b0000000 (all zero).
+        let mut when_slli = builder.when(local.instr_type.is_slli.clone());
+        for i in 1..8 {
+            when_slli.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
+        }
+
+        // SRLI: funct3 == 0b101, imm[11:5] == 0b0000000 (bits 25..32 all zero).
+        let mut when_srli = builder.when(local.instr_type.is_srli.clone());
+        for i in 0..3 {
+            let expected = if (0b101u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_srli.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+        let mut when_srli = builder.when(local.instr_type.is_srli.clone());
+        for i in 1..8 {
+            when_srli.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
+        }
+
+        // SRAI: funct3 == 0b101, imm[11:5] == 0b0100000 (bit 30 = 1, all others 0).
+        // bit 30 of the instruction = bit 6 of byte 3 = decompositions[3][6].
+        let mut when_srai = builder.when(local.instr_type.is_srai.clone());
+        for i in 0..3 {
+            let expected = if (0b101u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_srai.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+        // bits 25..30 (decompositions[3][1..6]) == 0
+        let mut when_srai = builder.when(local.instr_type.is_srai.clone());
+        for i in 1..6 {
+            when_srai.assert_eq(local.decompositions[3][i].clone(), AB::Expr::ZERO);
+        }
+        // bit 30 (decompositions[3][6]) == 1
+        let mut when_srai = builder.when(local.instr_type.is_srai.clone());
+        when_srai.assert_eq(local.decompositions[3][6].clone(), AB::Expr::ONE);
+        // bit 31 (decompositions[3][7]) == 0
+        let mut when_srai = builder.when(local.instr_type.is_srai.clone());
+        when_srai.assert_eq(local.decompositions[3][7].clone(), AB::Expr::ZERO);
+
         // rd = bits 7..12 (1 bit in byte 0, 4 bits in byte 1).
         let rd_expr = pack_bits::<AB, 4>(
             &local.decompositions,
@@ -305,14 +378,18 @@ where
         );
         builder.assert_eq(local.rs2.clone(), rs2_expr);
 
-        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=AND, 4=SLL, 5=SRL, 6=SRA.
+        // instr_type_packed: 0=ADDI, 1=XORI, 2=ADD, 3=AND, 4=SLL, 5=SRL, 6=SRA,
+        //                    7=SLLI, 8=SRLI, 9=SRAI.
         let packed = local.instr_type.is_addi.clone() * AB::Expr::ZERO
             + local.instr_type.is_xori.clone() * AB::Expr::ONE
             + local.instr_type.is_add.clone() * AB::Expr::from(AB::F::from_u32(2))
             + local.instr_type.is_and.clone() * AB::Expr::from(AB::F::from_u32(3))
             + local.instr_type.is_sll.clone() * AB::Expr::from(AB::F::from_u32(4))
             + local.instr_type.is_srl.clone() * AB::Expr::from(AB::F::from_u32(5))
-            + local.instr_type.is_sra.clone() * AB::Expr::from(AB::F::from_u32(6));
+            + local.instr_type.is_sra.clone() * AB::Expr::from(AB::F::from_u32(6))
+            + local.instr_type.is_slli.clone() * AB::Expr::from(AB::F::from_u32(7))
+            + local.instr_type.is_srli.clone() * AB::Expr::from(AB::F::from_u32(8))
+            + local.instr_type.is_srai.clone() * AB::Expr::from(AB::F::from_u32(9));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -352,18 +429,23 @@ impl<F: Field> LookupAir<F> for DecodeAir {
             ));
         }
 
-        // For the decode bus field4: use imm for I-type instructions and rs2 for R-type.
-        // is_i_type = is_addi + is_xori (one-hot so sum is 0 or 1, safe to use as multiplier).
-        // is_r_type = is_add + is_and + is_sll (one-hot so sum is 0 or 1, safe to use as multiplier).
+        // For the decode bus field4: use imm for standard I-type (ADDI/XORI),
+        // rs2 (= imm[4:0] = shamt) for shift-immediate instructions (SLLI/SRLI/SRAI),
+        // and rs2 for R-type instructions (ADD/AND/SLL/SRL/SRA).
         let is_i_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_addi)
             + SymbolicExpression::from(local.instr_type.is_xori);
+        // shift-immediate: send rs2 (= shamt = imm[4:0]) as field4.
+        let is_shift_imm: SymbolicExpression<F> =
+            SymbolicExpression::from(local.instr_type.is_slli)
+                + SymbolicExpression::from(local.instr_type.is_srli)
+                + SymbolicExpression::from(local.instr_type.is_srai);
         let is_r_type: SymbolicExpression<F> = SymbolicExpression::from(local.instr_type.is_add)
             + SymbolicExpression::from(local.instr_type.is_and)
             + SymbolicExpression::from(local.instr_type.is_sll)
             + SymbolicExpression::from(local.instr_type.is_srl)
             + SymbolicExpression::from(local.instr_type.is_sra);
         let field4: SymbolicExpression<F> = is_i_type * SymbolicExpression::from(local.imm)
-            + is_r_type * SymbolicExpression::from(local.rs2);
+            + (is_r_type + is_shift_imm) * SymbolicExpression::from(local.rs2);
 
         // export the decoded instruction
         lookups.push(self.register_lookup(
