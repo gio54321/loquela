@@ -1,6 +1,8 @@
 pub mod add;
 pub mod addi;
 pub mod and;
+pub mod auipc;
+pub mod lui;
 pub mod sll;
 pub mod slli;
 pub mod slt;
