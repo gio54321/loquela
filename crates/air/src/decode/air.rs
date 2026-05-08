@@ -37,6 +37,11 @@ pub struct Instruction<F> {
     pub is_bge: F,
     pub is_bltu: F,
     pub is_bgeu: F,
+    pub is_lw: F,
+    pub is_lh: F,
+    pub is_lb: F,
+    pub is_lhu: F,
+    pub is_lbu: F,
 }
 
 #[repr(u8)]
@@ -65,6 +70,11 @@ pub enum InstructionId {
     Bge = 21,
     Bltu = 22,
     Bgeu = 23,
+    Lw = 24,
+    Lh = 25,
+    Lb = 26,
+    Lhu = 27,
+    Lbu = 28,
 }
 
 #[repr(C)]
@@ -168,6 +178,11 @@ where
         builder.assert_bool(local.instr_type.is_bge.clone());
         builder.assert_bool(local.instr_type.is_bltu.clone());
         builder.assert_bool(local.instr_type.is_bgeu.clone());
+        builder.assert_bool(local.instr_type.is_lw.clone());
+        builder.assert_bool(local.instr_type.is_lh.clone());
+        builder.assert_bool(local.instr_type.is_lb.clone());
+        builder.assert_bool(local.instr_type.is_lhu.clone());
+        builder.assert_bool(local.instr_type.is_lbu.clone());
         builder.assert_eq(
             local.instr_type.is_addi.clone()
                 + local.instr_type.is_xori.clone()
@@ -192,7 +207,12 @@ where
                 + local.instr_type.is_blt.clone()
                 + local.instr_type.is_bge.clone()
                 + local.instr_type.is_bltu.clone()
-                + local.instr_type.is_bgeu.clone(),
+                + local.instr_type.is_bgeu.clone()
+                + local.instr_type.is_lw.clone()
+                + local.instr_type.is_lh.clone()
+                + local.instr_type.is_lb.clone()
+                + local.instr_type.is_lhu.clone()
+                + local.instr_type.is_lbu.clone(),
             AB::Expr::ONE,
         );
 
@@ -573,6 +593,72 @@ where
             when_bgeu.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ONE);
         }
 
+        // Load instructions: opcode == 0b0000011 (I-type, opcode=0x03).
+        let is_load: AB::Expr = local.instr_type.is_lw.clone()
+            + local.instr_type.is_lh.clone()
+            + local.instr_type.is_lb.clone()
+            + local.instr_type.is_lhu.clone()
+            + local.instr_type.is_lbu.clone();
+        let mut when_load = builder.when(is_load);
+        for i in 0..7 {
+            let expected = if (0b0000011u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_load.assert_eq(local.decompositions[0][i].clone(), expected);
+        }
+
+        // LW: funct3 == 0b010.
+        let mut when_lw = builder.when(local.instr_type.is_lw.clone());
+        for i in 0..3 {
+            let expected = if (0b010u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_lw.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // LH: funct3 == 0b001.
+        let mut when_lh = builder.when(local.instr_type.is_lh.clone());
+        for i in 0..3 {
+            let expected = if (0b001u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_lh.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // LB: funct3 == 0b000.
+        let mut when_lb = builder.when(local.instr_type.is_lb.clone());
+        for i in 0..3 {
+            when_lb.assert_eq(local.decompositions[1][4 + i].clone(), AB::Expr::ZERO);
+        }
+
+        // LHU: funct3 == 0b101.
+        let mut when_lhu = builder.when(local.instr_type.is_lhu.clone());
+        for i in 0..3 {
+            let expected = if (0b101u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_lhu.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
+        // LBU: funct3 == 0b100.
+        let mut when_lbu = builder.when(local.instr_type.is_lbu.clone());
+        for i in 0..3 {
+            let expected = if (0b100u32 >> i) & 1 == 1 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
+            when_lbu.assert_eq(local.decompositions[1][4 + i].clone(), expected);
+        }
+
         // imm_low8: lower 8 bits of the U-type 20-bit immediate (bits 19:12 of instruction).
         // = bits 15:12 (decompositions[1][4..7]) | bits 19:16 (decompositions[2][0..3]).
         let imm_low8_expr = pack_bits::<AB, 4>(
@@ -672,7 +758,12 @@ where
             + local.instr_type.is_blt.clone() * AB::Expr::from(AB::F::from_u32(20))
             + local.instr_type.is_bge.clone() * AB::Expr::from(AB::F::from_u32(21))
             + local.instr_type.is_bltu.clone() * AB::Expr::from(AB::F::from_u32(22))
-            + local.instr_type.is_bgeu.clone() * AB::Expr::from(AB::F::from_u32(23));
+            + local.instr_type.is_bgeu.clone() * AB::Expr::from(AB::F::from_u32(23))
+            + local.instr_type.is_lw.clone() * AB::Expr::from(AB::F::from_u32(24))
+            + local.instr_type.is_lh.clone() * AB::Expr::from(AB::F::from_u32(25))
+            + local.instr_type.is_lb.clone() * AB::Expr::from(AB::F::from_u32(26))
+            + local.instr_type.is_lhu.clone() * AB::Expr::from(AB::F::from_u32(27))
+            + local.instr_type.is_lbu.clone() * AB::Expr::from(AB::F::from_u32(28));
         builder.assert_eq(local.instr_type_packed.clone(), packed);
     }
 }
@@ -721,7 +812,12 @@ impl<F: Field> LookupAir<F> for DecodeAir {
             + SymbolicExpression::from(local.instr_type.is_xori)
             + SymbolicExpression::from(local.instr_type.is_slti)
             + SymbolicExpression::from(local.instr_type.is_sltiu)
-            + SymbolicExpression::from(local.instr_type.is_jalr);
+            + SymbolicExpression::from(local.instr_type.is_jalr)
+            + SymbolicExpression::from(local.instr_type.is_lw)
+            + SymbolicExpression::from(local.instr_type.is_lh)
+            + SymbolicExpression::from(local.instr_type.is_lb)
+            + SymbolicExpression::from(local.instr_type.is_lhu)
+            + SymbolicExpression::from(local.instr_type.is_lbu);
         // shift-immediate: send rs2 (= shamt = imm[4:0]) as field4.
         let is_shift_imm: SymbolicExpression<F> =
             SymbolicExpression::from(local.instr_type.is_slli)

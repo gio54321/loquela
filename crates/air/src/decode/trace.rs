@@ -72,6 +72,12 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
     let is_bge = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b101;
     let is_bltu = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b110;
     let is_bgeu = word & 0x7F == 0b110_0011 && (word >> 12) & 0x7 == 0b111;
+    // Load instructions: opcode=0x03 (0b0000011), distinguished by funct3.
+    let is_lw = word & 0x7F == 0b000_0011 && (word >> 12) & 0x7 == 0b010;
+    let is_lh = word & 0x7F == 0b000_0011 && (word >> 12) & 0x7 == 0b001;
+    let is_lb = word & 0x7F == 0b000_0011 && (word >> 12) & 0x7 == 0b000;
+    let is_lhu = word & 0x7F == 0b000_0011 && (word >> 12) & 0x7 == 0b101;
+    let is_lbu = word & 0x7F == 0b000_0011 && (word >> 12) & 0x7 == 0b100;
 
     // For U-type and JAL, imm_low8 = bits 19:12 of the instruction word.
     // B-type: imm_low8 = 0 (not used by the "decode_b" bus).
@@ -107,6 +113,11 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         is_bge: F::from_bool(is_bge),
         is_bltu: F::from_bool(is_bltu),
         is_bgeu: F::from_bool(is_bgeu),
+        is_lw: F::from_bool(is_lw),
+        is_lh: F::from_bool(is_lh),
+        is_lb: F::from_bool(is_lb),
+        is_lhu: F::from_bool(is_lhu),
+        is_lbu: F::from_bool(is_lbu),
     };
     row.instr_type_packed = if is_xori {
         F::ONE
@@ -154,6 +165,16 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut DecodeColumns<F>, pc: u32, wor
         F::from_u64(22)
     } else if is_bgeu {
         F::from_u64(23)
+    } else if is_lw {
+        F::from_u64(24)
+    } else if is_lh {
+        F::from_u64(25)
+    } else if is_lb {
+        F::from_u64(26)
+    } else if is_lhu {
+        F::from_u64(27)
+    } else if is_lbu {
+        F::from_u64(28)
     } else {
         F::ZERO
     };
