@@ -116,6 +116,17 @@ fn fill_row<F: PrimeCharacteristicRing>(row: &mut SraiColumns<F>, step: &SraiSte
     row.fill_byte = F::from_u64((sign_bit * 255) as u64);
     row.rs1_byte3_low7 = F::from_u64((rs1_b[3] as u32 & 0x7F) as u64);
 
+    // 0xFF >> bit_shamt and its carry; the carry is the top-bits mask used
+    // for sign extension within the high byte (see eval).
+    let srl_ff_shifted = 0xFFu32 >> bit_shamt;
+    let srl_ff_carry = if bit_shamt == 0 {
+        0u32
+    } else {
+        (0xFFu32 << (8 - bit_shamt)) & 0xFF
+    };
+    row.srl_ff_shifted = F::from_u64(srl_ff_shifted as u64);
+    row.srl_ff_carry = F::from_u64(srl_ff_carry as u64);
+
     row.is_dummy = F::ONE;
 
     row.next_pc = u32_to_limbs(step.pc + 4);
@@ -148,6 +159,8 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut SraiColumns<F>) {
         sign_bit: F::ZERO,
         fill_byte: F::ZERO,
         rs1_byte3_low7: F::ZERO,
+        srl_ff_shifted: F::ZERO,
+        srl_ff_carry: F::ZERO,
         next_pc: [F::from_u64(4), F::ZERO, F::ZERO, F::ZERO],
         next_pc_carries: [F::ZERO; 3],
         is_dummy: F::ZERO,

@@ -89,6 +89,13 @@ pub struct SraiColumns<F> {
     /// Low 7 bits of rs1_bytes[3]: `rs1_bytes[3] - sign_bit * 128`, range 0..127.
     pub rs1_byte3_low7: F,
 
+    /// `0xFF >> bit_shamt`. Constrained via a `byte_srl` lookup with input 0xFF.
+    pub srl_ff_shifted: F,
+    /// `(0xFF << (8 - bit_shamt)) & 0xFF` for `bit_shamt > 0`, else 0. This is the
+    /// "top-bits mask" for arithmetic shift sign extension within a byte.
+    /// Constrained as the carry output of the same `byte_srl(0xFF, bit_shamt)` lookup.
+    pub srl_ff_carry: F,
+
     /// `pc + 4` as four byte limbs, constrained by `u32_plus_four`.
     pub next_pc: [F; 4],
     /// Carry bits for the `pc + 4` addition (bytes 0–2 only; top carry is dropped).
@@ -207,15 +214,18 @@ where
         );
 
         // For SRA, carry from byte i flows into byte i-1 (lower index), same as SRL.
-        // inter_bytes[3] = shifted_bytes[3]             (high byte, no carry in)
-        // inter_bytes[i] = shifted_bytes[i] + carry_bytes[i+1]  for i=0,1,2
+        // inter_bytes[3] = shifted_bytes[3] + sign_bit * srl_ff_carry  (sign-extend the
+        //                                                              top `bit_shamt`
+        //                                                              bits within byte 3)
+        // inter_bytes[i] = shifted_bytes[i] + carry_bytes[i+1]          for i=0,1,2
         let inter0: AB::Expr =
             local.shifted_bytes[0].clone().into() + local.carry_bytes[1].clone().into();
         let inter1: AB::Expr =
             local.shifted_bytes[1].clone().into() + local.carry_bytes[2].clone().into();
         let inter2: AB::Expr =
             local.shifted_bytes[2].clone().into() + local.carry_bytes[3].clone().into();
-        let inter3: AB::Expr = local.shifted_bytes[3].clone().into();
+        let inter3: AB::Expr = local.shifted_bytes[3].clone().into()
+            + local.sign_bit.clone().into() * local.srl_ff_carry.clone().into();
 
         let fill: AB::Expr = local.fill_byte.clone().into();
 
@@ -365,6 +375,23 @@ impl<F: Field> LookupAir<F> for SraiAir {
                     )
                 }),
         );
+
+        // Extra byte_srl lookup with input 0xFF: yields (0xFF >> bit_shamt) and
+        // (0xFF << (8 - bit_shamt)) & 0xFF. We use the carry output as the
+        // sign-extension mask for the high byte's top `bit_shamt` bits.
+        lookups.push(self.register_lookup(
+            Kind::Global(String::from("byte_srl")),
+            &vec![(
+                vec![
+                    F::from_u64(0xFF).into(),
+                    local.bit_shamt.into(),
+                    local.srl_ff_shifted.into(),
+                    local.srl_ff_carry.into(),
+                ],
+                local.is_dummy.into(),
+                Direction::Send,
+            )],
+        ));
 
         // Byte range-checks for rd_bytes[i] via "bytes" bus.
         lookups.extend(local.rd_bytes.into_iter().map(|byte| {

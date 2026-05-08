@@ -205,6 +205,15 @@ fn debug_dump_jalr_basic() {
 
 #[test]
 #[ignore = "diagnostic dump; run with `--ignored`"]
+fn debug_dump_srai_negative() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -8i16));
+    program.extend_from_slice(&encode_srai(2, 1, 1));
+    debug_dump(&program);
+}
+
+#[test]
+#[ignore = "diagnostic dump; run with `--ignored`"]
 fn debug_dump_sra_negative() {
     let mut program = Vec::new();
     program.extend_from_slice(&encode_addi(1, 0, -8i16));

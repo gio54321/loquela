@@ -1314,6 +1314,14 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
                 let row = byte_val * 8 + bit_shamt;
                 byte_srl_mults[row] += Val::ONE;
             }
+            // SRA/SRAI also send an extra byte_srl(0xFF, bit_shamt) lookup to
+            // derive the within-byte sign-extension mask.
+            if matches!(
+                s.instruction,
+                Instruction::Sra { .. } | Instruction::SraiI { .. }
+            ) {
+                byte_srl_mults[0xFF * 8 + bit_shamt] += Val::ONE;
+            }
         }
         Some(loquela_air::primitives::byte_shift_right_lookup::build_trace::<Val>(&byte_srl_mults))
     } else {
