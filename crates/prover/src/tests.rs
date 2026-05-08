@@ -60,6 +60,15 @@ fn encode_xor(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
     word.to_le_bytes()
 }
 
+fn encode_or(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b110 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
@@ -392,4 +401,37 @@ fn negative_nonboolean_is_address_equal() {
         !prove_and_verify(traces),
         "non-boolean is_address_equal should fail verification"
     );
+}
+
+// ── OR instruction tests ──────────────────────────────────────────────────────
+
+/// Single OR: x3 = x1 | x2. Exercises the bytes_or bus.
+#[test]
+fn prove_single_or() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 10)); // x1 = 10
+    program.extend_from_slice(&encode_addi(2, 0, 7)); // x2 = 7
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 10 | 7 = 15
+    prove(&program);
+}
+
+/// OR with 0xFFFFFFFF produces all-ones regardless of the other operand.
+#[test]
+fn prove_or_all_ones() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = 0xFFFF_FFFF
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 5 | 0xFFFF_FFFF = 0xFFFF_FFFF
+    prove(&program);
+}
+
+/// Mixed ADDI + OR program exercising both I-type and OR R-type paths.
+#[test]
+fn prove_mixed_addi_or() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 0x0F)); // x1 = 0x0F
+    program.extend_from_slice(&encode_addi(2, 0, 0x70)); // x2 = 0x70
+    program.extend_from_slice(&encode_or(3, 1, 2)); // x3 = 0x0F | 0x70 = 0x7F
+    program.extend_from_slice(&encode_or(4, 3, 1)); // x4 = 0x7F | 0x0F = 0x7F
+    prove(&program);
 }
