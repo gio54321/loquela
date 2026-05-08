@@ -327,6 +327,62 @@ fn prove_srl_cross_byte() {
     prove(&program);
 }
 
+fn encode_sra(rd: u8, rs1: u8, rs2: u8) -> [u8; 4] {
+    let word = (0b010_0000u32 << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | (0b101 << 12)
+        | ((rd as u32) << 7)
+        | 0b011_0011;
+    word.to_le_bytes()
+}
+
+/// SRA on a positive number: 8 >> 3 = 1 (same as SRL for positive values).
+#[test]
+fn prove_sra_positive() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 8)); // x1 = 8
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = 8 >> 3 = 1
+    prove(&program);
+}
+
+/// SRA on a negative number: -8 >> 1 = -4 (0xFFFFFFF8 >> 1 = 0xFFFFFFFC).
+/// Arithmetic shift fills vacated high bits with sign bit (1).
+#[test]
+fn prove_sra_negative() {
+    let mut program = Vec::new();
+    // Build x1 = 0xFFFFFFF8 (-8): addi x1, x0, -8 (sign-extended)
+    program.extend_from_slice(&encode_addi(1, 0, -8i16)); // x1 = 0xFFFFFFF8
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = -8 >> 1 = -4 = 0xFFFFFFFC
+    prove(&program);
+}
+
+/// SRA by 0: result equals the input (identity).
+#[test]
+fn prove_sra_by_zero() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 42)); // x1 = 42
+                                                       // x2 = 0 (already zero), so SRA by 0 is identity
+    program.extend_from_slice(&encode_sra(3, 1, 2)); // x3 = 42 >> 0 = 42
+    prove(&program);
+}
+
+/// SRA of 0x80000000 >> 1 = 0xC0000000 (arithmetic, sign bit propagates).
+#[test]
+fn prove_sra_sign_extension() {
+    let mut program = Vec::new();
+    // Build x1 = 0x80000000: start with 1, shift left by 31.
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 31)); // x2 = 31
+    program.extend_from_slice(&encode_sll(3, 1, 2)); // x3 = 1 << 31 = 0x80000000
+                                                     // Now shift right arithmetically by 1 — result is 0xC0000000 (sign extends).
+    program.extend_from_slice(&encode_addi(4, 0, 1)); // x4 = 1
+    program.extend_from_slice(&encode_sra(5, 3, 4)); // x5 = 0x80000000 >> 1 = 0xC0000000
+    prove(&program);
+}
+
 // ── Negative tests ────────────────────────────────────────────────────────────
 //
 // Each test corrupts one field in an otherwise-valid witness and asserts
