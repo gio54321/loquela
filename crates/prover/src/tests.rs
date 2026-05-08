@@ -889,3 +889,206 @@ fn prove_jalr_with_imm() {
     program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
     prove(&program);
 }
+
+// ── Branch instruction helpers ────────────────────────────────────────────────
+
+fn encode_branch(funct3: u8, rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    let imm = imm as u32;
+    let imm12 = (imm >> 12) & 1;
+    let imm10_5 = (imm >> 5) & 0x3F;
+    let imm4_1 = (imm >> 1) & 0xF;
+    let imm11 = (imm >> 11) & 1;
+    let word = (imm12 << 31)
+        | (imm10_5 << 25)
+        | ((rs2 as u32) << 20)
+        | ((rs1 as u32) << 15)
+        | ((funct3 as u32) << 12)
+        | (imm4_1 << 8)
+        | (imm11 << 7)
+        | 0b110_0011;
+    word.to_le_bytes()
+}
+
+fn encode_beq(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b000, rs1, rs2, imm)
+}
+fn encode_bne(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b001, rs1, rs2, imm)
+}
+fn encode_blt(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b100, rs1, rs2, imm)
+}
+fn encode_bge(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b101, rs1, rs2, imm)
+}
+fn encode_bltu(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b110, rs1, rs2, imm)
+}
+fn encode_bgeu(rs1: u8, rs2: u8, imm: i32) -> [u8; 4] {
+    encode_branch(0b111, rs1, rs2, imm)
+}
+
+// ── BEQ tests ────────────────────────────────────────────────────────────────
+
+/// BEQ taken: rs1 == rs2, so jump forward by 8.
+/// pc=0: beq x0, x0, +8  → taken, jump to pc=8
+/// pc=4: addi x1, x0, 99 (skipped)
+/// pc=8: addi x2, x0, 42
+#[test]
+fn prove_beq_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_beq(0, 0, 8)); // beq x0, x0, +8  (taken)
+    program.extend_from_slice(&encode_addi(1, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(2, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BEQ not taken: rs1 != rs2, fall through.
+/// pc=0: addi x1, x0, 5
+/// pc=4: addi x2, x0, 3
+/// pc=8: beq x1, x2, +8  → not taken (5 != 3)
+/// pc=12: addi x3, x0, 7 (executed)
+/// pc=16: addi x4, x0, 99 (would be jumped to, but execution stops)
+#[test]
+fn prove_beq_not_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_beq(1, 2, 8)); // beq x1, x2, +8 (not taken)
+    program.extend_from_slice(&encode_addi(3, 0, 7)); // x3 = 7 (executed)
+    prove(&program);
+}
+
+// ── BNE tests ────────────────────────────────────────────────────────────────
+
+/// BNE taken: rs1 != rs2, jump forward by 8.
+/// pc=0: addi x1, x0, 5
+/// pc=4: addi x2, x0, 3
+/// pc=8: bne x1, x2, +8  → taken (5 != 3), jump to pc=16
+/// pc=12: addi x3, x0, 99 (skipped)
+/// pc=16: addi x4, x0, 42
+#[test]
+fn prove_bne_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_bne(1, 2, 8)); // bne x1, x2, +8 (taken)
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BNE not taken: rs1 == rs2, fall through.
+/// pc=0: bne x0, x0, +8  → not taken (0 == 0)
+/// pc=4: addi x1, x0, 7 (executed)
+#[test]
+fn prove_bne_not_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_bne(0, 0, 8)); // bne x0, x0, +8 (not taken)
+    program.extend_from_slice(&encode_addi(1, 0, 7)); // x1 = 7 (executed)
+    prove(&program);
+}
+
+// ── BLTU / BGEU tests ────────────────────────────────────────────────────────
+
+/// BLTU taken: rs1 < rs2 (unsigned), jump forward.
+/// x1=1, x2=2: 1 <u 2 is true.
+#[test]
+fn prove_bltu_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 2)); // x2 = 2
+    program.extend_from_slice(&encode_bltu(1, 2, 8)); // bltu x1, x2, +8 (taken)
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BLTU not taken: rs1 >= rs2 (unsigned), fall through.
+/// x1=5, x2=3: 5 <u 3 is false.
+#[test]
+fn prove_bltu_not_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_bltu(1, 2, 8)); // bltu x1, x2, +8 (not taken)
+    program.extend_from_slice(&encode_addi(3, 0, 7)); // x3 = 7 (executed)
+    prove(&program);
+}
+
+/// BGEU taken: rs1 >= rs2 (unsigned).
+/// x1=5, x2=3: 5 >=u 3 is true.
+#[test]
+fn prove_bgeu_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 5)); // x1 = 5
+    program.extend_from_slice(&encode_addi(2, 0, 3)); // x2 = 3
+    program.extend_from_slice(&encode_bgeu(1, 2, 8)); // bgeu x1, x2, +8 (taken)
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BGEU not taken: rs1 < rs2 (unsigned), fall through.
+/// x1=1, x2=2: 1 >=u 2 is false.
+#[test]
+fn prove_bgeu_not_taken() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, 2)); // x2 = 2
+    program.extend_from_slice(&encode_bgeu(1, 2, 8)); // bgeu x1, x2, +8 (not taken)
+    program.extend_from_slice(&encode_addi(3, 0, 7)); // x3 = 7 (executed)
+    prove(&program);
+}
+
+// ── BLT / BGE tests (signed) ─────────────────────────────────────────────────
+
+/// BLT taken: rs1 < rs2 (signed).
+/// x1=-1 (0xFFFF_FFFF), x2=1: -1 <s 1 is true.
+#[test]
+fn prove_blt_taken_signed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1 (0xFFFF_FFFF)
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_blt(1, 2, 8)); // blt x1, x2, +8 (taken: -1 < 1)
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BLT not taken: rs1 >= rs2 (signed).
+/// x1=1, x2=-1: 1 <s -1 is false.
+#[test]
+fn prove_blt_not_taken_signed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1
+    program.extend_from_slice(&encode_blt(1, 2, 8)); // blt x1, x2, +8 (not taken: 1 >= -1)
+    program.extend_from_slice(&encode_addi(3, 0, 7)); // x3 = 7 (executed)
+    prove(&program);
+}
+
+/// BGE taken: rs1 >= rs2 (signed).
+/// x1=1, x2=-1: 1 >=s -1 is true.
+#[test]
+fn prove_bge_taken_signed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, 1)); // x1 = 1
+    program.extend_from_slice(&encode_addi(2, 0, -1i16)); // x2 = -1
+    program.extend_from_slice(&encode_bge(1, 2, 8)); // bge x1, x2, +8 (taken: 1 >= -1)
+    program.extend_from_slice(&encode_addi(3, 0, 99)); // skipped
+    program.extend_from_slice(&encode_addi(4, 0, 42)); // executed
+    prove(&program);
+}
+
+/// BGE not taken: rs1 < rs2 (signed).
+/// x1=-1, x2=1: -1 >=s 1 is false.
+#[test]
+fn prove_bge_not_taken_signed() {
+    let mut program = Vec::new();
+    program.extend_from_slice(&encode_addi(1, 0, -1i16)); // x1 = -1
+    program.extend_from_slice(&encode_addi(2, 0, 1)); // x2 = 1
+    program.extend_from_slice(&encode_bge(1, 2, 8)); // bge x1, x2, +8 (not taken: -1 < 1)
+    program.extend_from_slice(&encode_addi(3, 0, 7)); // x3 = 7 (executed)
+    prove(&program);
+}
