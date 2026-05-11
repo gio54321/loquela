@@ -17,3 +17,5 @@ p3-symmetric = { version = "0.5.2" }
 p3-uni-stark = { version = "0.5.2" }
 p3-batch-stark = { version = "0.5.2" }
 p3-lookup = { version = "0.5.2" }
+p3-poseidon2 = { version = "0.5.2" }
+p3-poseidon2-air = { version = "0.5.2" }

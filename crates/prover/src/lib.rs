@@ -41,6 +41,9 @@ use loquela_air::instructions::sub::air::SubAir;
 use loquela_air::instructions::xor::air::XorInstrAir;
 use loquela_air::instructions::xori::air::XoriAir;
 use loquela_air::memory::air::MemoryAir;
+use loquela_air::program_hash::air::ProgramHashAir;
+use loquela_air::program_hash::columns::NUM_PUBLIC_VALUES as PROGRAM_HASH_NUM_PV;
+use loquela_air::program_hash::trace::compute_program_digest;
 use loquela_air::primitives::and_lookup::AndAir;
 use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
 use loquela_air::primitives::byte_lookup::BytesAir;
@@ -110,6 +113,7 @@ pub enum LoquelAir {
     OrInstr(OrInstrAir),
     Memory(MemoryAir),
     Program(ProgramAir),
+    ProgramHash(ProgramHashAir),
     Bytes(BytesAir),
     And(AndAir),
     ByteSll(ByteShiftLeftAir),
@@ -153,6 +157,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::OrInstr(a) => BaseAir::<F>::width(a),
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
+            LoquelAir::ProgramHash(a) => BaseAir::<F>::width(a),
             LoquelAir::Bytes(a) => BaseAir::<F>::width(a),
             LoquelAir::And(a) => BaseAir::<F>::width(a),
             LoquelAir::ByteSll(a) => BaseAir::<F>::width(a),
@@ -190,6 +195,13 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             _ => None,
         }
     }
+
+    fn num_public_values(&self) -> usize {
+        match self {
+            LoquelAir::ProgramHash(a) => <ProgramHashAir as BaseAir<F>>::num_public_values(a),
+            _ => 0,
+        }
+    }
 }
 
 impl<AB> Air<AB> for LoquelAir
@@ -219,6 +231,7 @@ where
             LoquelAir::OrInstr(a) => a.eval(builder),
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
+            LoquelAir::ProgramHash(a) => a.eval(builder),
             LoquelAir::Bytes(a) => a.eval(builder),
             LoquelAir::And(a) => a.eval(builder),
             LoquelAir::ByteSll(a) => a.eval(builder),
@@ -264,6 +277,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::ProgramHash(a) => <ProgramHashAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::add_lookup_columns(a),
@@ -309,6 +323,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::OrInstr(a) => <OrInstrAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::ProgramHash(a) => <ProgramHashAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::get_lookups(a),
@@ -341,6 +356,9 @@ pub struct AllTraces {
     pub decode: RowMajorMatrix<Val>,
     pub memory: RowMajorMatrix<Val>,
     pub program: RowMajorMatrix<Val>,
+    pub program_hash: RowMajorMatrix<Val>,
+    /// `(digest_0, ..., digest_7, program_length)` exposed to the verifier.
+    pub program_hash_public_values: Vec<Val>,
     pub bytes: RowMajorMatrix<Val>,
     pub and: RowMajorMatrix<Val>,
     pub or: RowMajorMatrix<Val>,
@@ -406,13 +424,25 @@ pub struct AllTraces {
 
 impl AllTraces {
     /// Flatten into parallel vecs in the same order as `airs`.
-    pub fn into_vecs(self) -> (Vec<LoquelAir>, Vec<RowMajorMatrix<Val>>) {
+    ///
+    /// The third element is the per-AIR public-values vector (empty for AIRs
+    /// without public values; the program-hash AIR carries
+    /// `(digest, length)`).
+    pub fn into_vecs(
+        self,
+    ) -> (
+        Vec<LoquelAir>,
+        Vec<RowMajorMatrix<Val>>,
+        Vec<Vec<Val>>,
+    ) {
         let AllTraces {
             airs,
             boundaries,
             decode,
             memory,
             program,
+            program_hash,
+            program_hash_public_values,
             bytes,
             and,
             or,
@@ -540,7 +570,23 @@ impl AllTraces {
         if let Some(t) = jalr {
             traces.push(t);
         }
-        (airs, traces)
+        // Program hash trace is appended last, mirroring its position in the
+        // AIR list (set when constructing AllTraces in `generate_traces`).
+        traces.push(program_hash);
+
+        // Per-AIR public values. Only the program-hash instance carries
+        // non-empty values, and `generate_traces` guarantees ProgramHash is the
+        // last AIR. Assert that invariant here so a future refactor that
+        // reorders the AIR list fails loudly instead of misrouting PVs.
+        assert!(
+            matches!(airs.last(), Some(LoquelAir::ProgramHash(_))),
+            "ProgramHash must be the last AIR so its public values land in the final PV slot"
+        );
+        let mut pvs: Vec<Vec<Val>> = vec![vec![]; airs.len()];
+        if let Some(last) = pvs.last_mut() {
+            *last = program_hash_public_values;
+        }
+        (airs, traces, pvs)
     }
 }
 
@@ -1131,6 +1177,11 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     for &b in &byte_checked_singles {
         bytes_mults[b as usize] += Val::ONE;
     }
+    // ProgramHashAir sends each absorbed program byte to the `bytes` bus for
+    // range-checking. Match those sends with receives on the table side.
+    for &b in program {
+        bytes_mults[b as usize] += Val::ONE;
+    }
     let bytes = loquela_air::primitives::byte_lookup::build_trace::<Val>(&bytes_mults);
 
     let mut xori_triples: Vec<(u32, u32, u32)> = Vec::new();
@@ -1427,6 +1478,18 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_jalr {
         airs.push(LoquelAir::Jalr(JalrAir::new()));
     }
+    // Program-hash AIR is appended last so its public values land in the final
+    // slot of the per-AIR public-values vector built by `into_vecs`.
+    airs.push(LoquelAir::ProgramHash(ProgramHashAir::new()));
+
+    // Program-image Poseidon2 trace + matching public values.
+    let program_hash =
+        loquela_air::program_hash::trace::build_trace(program);
+    let (digest, length) = compute_program_digest(program);
+    let mut program_hash_public_values: Vec<Val> = Vec::with_capacity(PROGRAM_HASH_NUM_PV);
+    program_hash_public_values.extend_from_slice(&digest);
+    program_hash_public_values.push(Val::from_u32(length));
+    debug_assert_eq!(program_hash_public_values.len(), PROGRAM_HASH_NUM_PV);
 
     AllTraces {
         airs,
@@ -1434,6 +1497,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         decode,
         memory,
         program: program_trace,
+        program_hash,
+        program_hash_public_values,
         bytes,
         and,
         or,
@@ -1479,24 +1544,26 @@ fn do_prove(
     config: &MyConfig,
     airs: &[LoquelAir],
     traces: &[RowMajorMatrix<Val>],
+    pvs: &[Vec<Val>],
 ) -> (BatchProof<MyConfig>, CommonData<MyConfig>) {
     let trace_refs: Vec<&RowMajorMatrix<Val>> = traces.iter().collect();
-    let pvs: Vec<Vec<Val>> = vec![vec![]; airs.len()];
+    assert_eq!(pvs.len(), airs.len());
 
     let initial_instances: Vec<StarkInstance<'_, MyConfig, LoquelAir>> = airs
         .iter()
         .zip(trace_refs.iter())
-        .map(|(air, trace)| StarkInstance {
+        .zip(pvs.iter())
+        .map(|((air, trace), public_values)| StarkInstance {
             air,
             trace,
-            public_values: vec![],
+            public_values: public_values.clone(),
             lookups: vec![],
         })
         .collect();
 
     println!("Building prover data ({} AIRs)...", airs.len());
     let prover_data = ProverData::from_instances(config, &initial_instances);
-    let instances = StarkInstance::new_multiple(airs, &trace_refs, &pvs, &prover_data.common);
+    let instances = StarkInstance::new_multiple(airs, &trace_refs, pvs, &prover_data.common);
 
     println!("Proving...");
     let proof = prove_batch(config, &instances, &prover_data);
@@ -1505,9 +1572,9 @@ fn do_prove(
 
 /// Prove a set of traces produced by `generate_traces` (or a mutation thereof).
 pub fn prove_traces(all_traces: AllTraces) -> BatchProof<MyConfig> {
-    let (airs, traces) = all_traces.into_vecs();
+    let (airs, traces, pvs) = all_traces.into_vecs();
     let config = build_config();
-    do_prove(&config, &airs, &traces).0
+    do_prove(&config, &airs, &traces, &pvs).0
 }
 
 /// Execute `program`, build all traces, and return a batch STARK proof.

@@ -37,6 +37,7 @@ pub fn air_name(air: &LoquelAir) -> &'static str {
         LoquelAir::OrInstr(_) => "OrInstr",
         LoquelAir::Memory(_) => "Memory",
         LoquelAir::Program(_) => "Program",
+        LoquelAir::ProgramHash(_) => "ProgramHash",
         LoquelAir::Bytes(_) => "Bytes",
         LoquelAir::And(_) => "And(andi-prim)",
         LoquelAir::ByteSll(_) => "ByteSll",
