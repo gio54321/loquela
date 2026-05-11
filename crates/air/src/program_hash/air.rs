@@ -1,5 +1,4 @@
 use core::borrow::Borrow;
-use std::iter::once;
 use std::vec;
 use std::vec::Vec;
 
@@ -15,8 +14,6 @@ use p3_mersenne_31::{
 };
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use p3_poseidon2_air::{FullRound, PartialRound, SBox};
-
-use crate::primitives::u32_ops::u32_inc;
 
 use super::columns::{
     NUM_COLS, NUM_PUBLIC_VALUES, ProgramHashColumns, BYTES_PER_RATE_ELEM, BYTES_PER_ROW,
@@ -193,38 +190,23 @@ where
             );
         }
 
-        // ─── 7. First-row base address = 0 ───────────────────────────────────
-        for b in 0..4 {
-            builder
-                .when_first_row()
-                .assert_zero(local.addrs[0][b].clone());
-        }
-
-        // ─── 8. Intra-row address increments addrs[i+1] = addrs[i] + 1 ───────
-        // Unconditional: applies on every row (real and padding). Trace gen
-        // continues the global byte index through the padding suffix so these
-        // constraints are always satisfiable. The lookup multiplicities use
-        // is_active, so padding-row addresses are not Sent.
-        for i in 0..BYTES_PER_ROW - 1 {
-            u32_inc(
-                builder,
-                &local.addrs[i],
-                &local.addrs[i + 1],
-                &local.addr_inc_carries[i],
-            );
-        }
-
-        // ─── 9. Cross-row address: next.addrs[0] = local.addrs[K-1] + 1 ──────
-        // Unconditional across all transitions (continuous global byte index).
-        {
-            let mut t = builder.when_transition();
-            u32_inc(
-                &mut t,
-                &local.addrs[BYTES_PER_ROW - 1],
-                &next.addrs[0],
-                &local.cross_row_addr_inc_carries,
-            );
-        }
+        // ─── 7. base_addr chain: 0 on row 0, +BYTES_PER_ROW per transition ──
+        // Per-byte addresses are derived as `base_addr + i` (a degree-1
+        // symbolic expression of `base_addr` plus a constant); intra- and
+        // cross-row carry math is no longer needed because the chain lives in
+        // a single field element (Mersenne31 has 31 bits of headroom; Loquela
+        // programs are far smaller than 2^31 bytes). Soundness of the bus is
+        // unaffected: ProgramAir's `inc_carries[3] = 0` keeps its
+        // single-element address combination a pure `+1` chain pinned to 0,
+        // and ProgramHash's chain is `+24` pinned to 0, so the tuples align
+        // by induction.
+        builder
+            .when_first_row()
+            .assert_zero(local.base_addr.clone());
+        builder.when_transition().assert_eq(
+            next.base_addr.clone(),
+            local.base_addr.clone() + AB::F::from_u32(BYTES_PER_ROW as u32),
+        );
 
         // ─── 10. Padding-row state pin: (1 - flag) * state[i] = 0 ────────────
         // INIT is all-zero. On padding rows, state[i] = 0 means perm input is
@@ -390,16 +372,17 @@ impl<F: Field> LookupAir<F> for ProgramHashAir {
 
         let mut lookups = Vec::new();
 
-        // Program-image bus: one tuple per byte, (addr_limbs, value), mult =
-        // is_active[i]. ProgramAir Receives the same tuples with mult=is_real;
-        // zero-sum forces the prover to absorb exactly the real ROM bytes in
-        // order.
+        // Program-image bus: one tuple per byte, (base_addr + i, byte), mult =
+        // is_active[i]. ProgramAir Receives matching tuples (its own
+        // single-element address comes from a symbolic combination of the
+        // 4-limb `address` columns); zero-sum forces the prover to absorb
+        // exactly the real ROM bytes in order.
         for i in 0..BYTES_PER_ROW {
-            let elements: Vec<SymbolicExpression<F>> = symbolic_local.addrs[i]
-                .into_iter()
-                .map(Into::into)
-                .chain(once(symbolic_local.bytes[i].clone().into()))
-                .collect();
+            let addr_expr: SymbolicExpression<F> =
+                SymbolicExpression::from(symbolic_local.base_addr)
+                    + SymbolicExpression::from(F::from_u32(i as u32));
+            let elements: Vec<SymbolicExpression<F>> =
+                vec![addr_expr, symbolic_local.bytes[i].clone().into()];
             let mult: SymbolicExpression<F> = symbolic_local.is_active[i].clone().into();
             lookups.push(self.register_lookup(
                 Kind::Global(String::from("program_image")),

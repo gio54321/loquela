@@ -54,18 +54,11 @@ pub struct ProgramHashColumns<T> {
     /// Program bytes absorbed on this row, in order.
     pub bytes: [T; BYTES_PER_ROW],
 
-    /// Address of each absorbed byte as 4 byte-limbs. `addrs[0]` is the row's
-    /// base address; `addrs[i + 1] = addrs[i] + 1` is enforced via
-    /// `addr_inc_carries[i]`. The 4-limb form matches the `program_image`
-    /// bus tuple shape.
-    pub addrs: [[T; 4]; BYTES_PER_ROW],
-
-    /// Carries for `addrs[i + 1] = addrs[i] + 1` (intra-row `u32_inc`).
-    pub addr_inc_carries: [[T; 4]; BYTES_PER_ROW - 1],
-
-    /// Carries linking the last in-row address `addrs[BYTES_PER_ROW - 1]` to
-    /// the next row's `addrs[0]` (cross-row `u32_inc`).
-    pub cross_row_addr_inc_carries: [T; 4],
+    /// Global byte-index of `bytes[0]` on this row, packed into a single field
+    /// element. Pinned to 0 on row 0 and incremented by `BYTES_PER_ROW` per
+    /// transition. Per-byte addresses are derived symbolically at lookup
+    /// emission time as `base_addr + i` (degree-1 expression).
+    pub base_addr: T,
 
     /// Per-byte activity flag. 1 = real program byte (Sent on the
     /// `program_image` and `bytes` buses), 0 = trailing pad bytes on the last

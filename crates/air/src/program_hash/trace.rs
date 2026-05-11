@@ -12,35 +12,6 @@ use super::columns::{
     PARTIAL_ROUNDS, ProgramHashColumns, RATE_ELEMS, WIDTH,
 };
 
-fn u32_to_limbs(v: u32) -> [Mersenne31; 4] {
-    let b = v.to_le_bytes();
-    [
-        Mersenne31::from_u64(b[0] as u64),
-        Mersenne31::from_u64(b[1] as u64),
-        Mersenne31::from_u64(b[2] as u64),
-        Mersenne31::from_u64(b[3] as u64),
-    ]
-}
-
-/// Carry bits for `addr + 1` byte by byte (matches `u32_inc`).
-fn inc_carries(addr: u32) -> [Mersenne31; 4] {
-    let b = addr.to_le_bytes();
-    let s0 = b[0] as u32 + 1;
-    let c0 = (s0 >> 8) as u8;
-    let s1 = b[1] as u32 + c0 as u32;
-    let c1 = (s1 >> 8) as u8;
-    let s2 = b[2] as u32 + c1 as u32;
-    let c2 = (s2 >> 8) as u8;
-    let s3 = b[3] as u32 + c2 as u32;
-    let c3 = (s3 >> 8) as u8;
-    [
-        Mersenne31::from_u64(c0 as u64),
-        Mersenne31::from_u64(c1 as u64),
-        Mersenne31::from_u64(c2 as u64),
-        Mersenne31::from_u64(c3 as u64),
-    ]
-}
-
 /// Fill the Poseidon2 witness columns for one permutation invocation. Mirrors
 /// `p3_poseidon2_air::generate_trace_rows_for_perm` but works on initialized
 /// columns (we wrote zeros earlier) and uses concrete Mersenne31 constants.
@@ -181,22 +152,14 @@ pub fn build_trace(program: &[u8]) -> RowMajorMatrix<Mersenne31> {
         assert!(suffix.is_empty(), "alignment mismatch");
         assert_eq!(rows.len(), num_rows);
 
-        // ── Pass 1: fill local-only fields (addresses, bytes/is_active, flag,
-        // cum_active). The address chain runs continuously across all rows so
-        // unconditional intra-row and cross-row `u32_inc` constraints hold.
+        // ── Pass 1: fill local-only fields (base_addr, bytes/is_active, flag,
+        // cum_active). The base_addr chain runs continuously across all rows.
         let mut cum_active: u32 = 0;
         for (row_idx, row) in rows.iter_mut().enumerate() {
-            let base = row_idx * BYTES_PER_ROW;
-            for i in 0..BYTES_PER_ROW {
-                row.addrs[i] = u32_to_limbs((base + i) as u32);
-            }
-            for i in 0..BYTES_PER_ROW - 1 {
-                row.addr_inc_carries[i] = inc_carries((base + i) as u32);
-            }
-            row.cross_row_addr_inc_carries =
-                inc_carries((base + BYTES_PER_ROW - 1) as u32);
+            row.base_addr = Mersenne31::from_u32((row_idx * BYTES_PER_ROW) as u32);
 
             if row_idx < num_real_rows {
+                let base = row_idx * BYTES_PER_ROW;
                 for i in 0..BYTES_PER_ROW {
                     let global_addr = base + i;
                     if global_addr < n {
