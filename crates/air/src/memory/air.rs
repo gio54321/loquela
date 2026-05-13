@@ -156,33 +156,44 @@ impl<F: Field> LookupAir<F> for MemoryAir {
             p3_air::SymbolicExpression::from(F::ONE) - symbolic_main_next.is_padding.clone();
 
         // address must always be sorted unless the memory type is different, so we send with mult is_memory_type_equal
-        lookups.push(self.register_lookup(
-            Kind::Global(String::from("u32_lt")),
-            &vec![(symbolic_main_local.address.into_iter().chain(
-                symbolic_main_next.address.into_iter()).chain(
-                        once(symbolic_main_local.is_address_equal.clone()))
-                    .map(Into::into)
-                    .collect::<Vec<_>>(),
-            (Into::<p3_air::SymbolicExpression<F>>::into(symbolic_main_local.is_memory_type_equal.clone())
-                * real_transition.clone()).into(),
-            Direction::Send,
-        )],
-        ));
+        lookups.push(
+            self.register_lookup(
+                Kind::Global(String::from("u32_lt")),
+                &vec![(
+                    symbolic_main_local
+                        .address
+                        .into_iter()
+                        .chain(symbolic_main_next.address.into_iter())
+                        .chain(once(symbolic_main_local.is_address_equal.clone()))
+                        .map(Into::into)
+                        .collect::<Vec<_>>(),
+                    (Into::<p3_air::SymbolicExpression<F>>::into(
+                        symbolic_main_local.is_memory_type_equal.clone(),
+                    ) * real_transition.clone())
+                    .into(),
+                    Direction::Send,
+                )],
+            ),
+        );
 
         // timestamp must be sorted unless the address is different, so we send with mult is_address_equal
-        lookups.push(self.register_lookup(
-            Kind::Global(String::from("timestamp_lt")),
-            &vec![(
-                vec![
-                    symbolic_main_local.timestamp.clone().into(),
-                    symbolic_main_next.timestamp.clone().into(),
-                    symbolic_main_local.is_timestamp_equal.clone().into(),
-                ],
-                (Into::<p3_air::SymbolicExpression<F>>::into(symbolic_main_local.is_address_equal.clone())
-                    * real_transition).into(),
-                Direction::Send,
-            )],
-        ));
+        lookups.push(
+            self.register_lookup(
+                Kind::Global(String::from("timestamp_lt")),
+                &vec![(
+                    vec![
+                        symbolic_main_local.timestamp.clone().into(),
+                        symbolic_main_next.timestamp.clone().into(),
+                        symbolic_main_local.is_timestamp_equal.clone().into(),
+                    ],
+                    (Into::<p3_air::SymbolicExpression<F>>::into(
+                        symbolic_main_local.is_address_equal.clone(),
+                    ) * real_transition)
+                        .into(),
+                    Direction::Send,
+                )],
+            ),
+        );
 
         lookups.push(self.register_lookup(
             Kind::Global(String::from("memory")),

@@ -3,9 +3,7 @@
 //! around p3-lookup's `check_lookups` so any global-bus imbalance is reported
 //! with concrete (instance, lookup, row) locations.
 
-use p3_air::{
-    AirBuilder, BaseAir, ExtensionBuilder, PermutationAirBuilder, RowWindow,
-};
+use p3_air::{AirBuilder, BaseAir, ExtensionBuilder, PermutationAirBuilder, RowWindow};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_lookup::{
     debug_util::{check_lookups, LookupDebugInstance},
@@ -37,6 +35,8 @@ pub fn air_name(air: &LoquelAir) -> &'static str {
         LoquelAir::OrInstr(_) => "OrInstr",
         LoquelAir::Memory(_) => "Memory",
         LoquelAir::Program(_) => "Program",
+        LoquelAir::ProgramHash(_) => "ProgramHash",
+        LoquelAir::Poseidon2Chip(_) => "Poseidon2Chip",
         LoquelAir::Bytes(_) => "Bytes",
         LoquelAir::And(_) => "And(andi-prim)",
         LoquelAir::ByteSll(_) => "ByteSll",
@@ -153,9 +153,7 @@ pub fn dump_traces_and_lookups(airs: &mut [LoquelAir], traces: &[RowMajorMatrix<
         let name = air_name(air);
         let height = trace.height();
         let width = trace.width;
-        println!(
-            "\n========== AIR[{i}] {name}  ({height} rows × {width} cols) =========="
-        );
+        println!("\n========== AIR[{i}] {name}  ({height} rows × {width} cols) ==========");
 
         let main_rows: Vec<Vec<Val>> = materialize(trace);
         for (r, row) in main_rows.iter().enumerate() {

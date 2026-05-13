@@ -66,7 +66,8 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
 
     for (i, row) in rows.iter_mut().enumerate() {
         row.address = u32_to_limbs(i as u32);
-        row.value = if i < n_bytes {
+        let real = i < n_bytes;
+        row.value = if real {
             F::from_u64(program[i] as u64)
         } else {
             F::ZERO
@@ -79,6 +80,7 @@ pub fn build_trace<F: PrimeCharacteristicRing + Send + Sync>(
             F::from_u64(c[2] as u64),
             F::from_u64(c[3] as u64),
         ];
+        row.is_real = if real { F::ONE } else { F::ZERO };
     }
 
     RowMajorMatrix::new(values, NUM_MEMORY_COLS)

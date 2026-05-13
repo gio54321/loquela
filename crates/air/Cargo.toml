@@ -19,3 +19,5 @@ p3-symmetric = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-batch-stark = { workspace = true }
 p3-lookup = { workspace = true }
+p3-poseidon2 = { workspace = true }
+p3-poseidon2-air = { workspace = true }

@@ -194,9 +194,7 @@ fn fill_padding_row<F: PrimeCharacteristicRing>(row: &mut JalColumns<F>) {
     };
 }
 
-pub fn build_trace<F: Field + Send + Sync>(
-    steps: &[ExecutionStep],
-) -> DenseMatrix<F> {
+pub fn build_trace<F: Field + Send + Sync>(steps: &[ExecutionStep]) -> DenseMatrix<F> {
     let jal_steps = extract_jal_steps(steps);
     assert!(!jal_steps.is_empty(), "no JAL steps found in trace");
 

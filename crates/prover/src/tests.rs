@@ -123,10 +123,9 @@ fn encode_jalr(rd: u8, rs1: u8, imm: i32) -> [u8; 4] {
 /// Prove and verify a set of (possibly modified) traces.
 /// Returns `true` if verification succeeds, `false` otherwise.
 fn prove_and_verify(traces: AllTraces) -> bool {
-    let (airs, trace_vecs) = traces.into_vecs();
+    let (airs, trace_vecs, pvs) = traces.into_vecs();
     let config = build_config();
-    let (proof, common) = do_prove(&config, &airs, &trace_vecs);
-    let pvs = vec![vec![]; airs.len()];
+    let (proof, common) = do_prove(&config, &airs, &trace_vecs, &pvs);
     verify_batch(&config, &airs, &proof, &pvs, &common).is_ok()
 }
 
@@ -137,13 +136,137 @@ fn prove_verify(program: &[u8]) {
     );
 }
 
+#[test]
+fn program_hash_public_values_match_host_digest() {
+    use loquela_air::program_hash::columns::{DIGEST_LEN, PV_LENGTH_INDEX};
+    use loquela_air::program_hash::trace::compute_program_digest;
+
+    let program = encode_addi(1, 0, 1).to_vec();
+    let traces = generate_traces(&program);
+
+    let pvs = &traces.program_hash_public_values;
+    assert_eq!(pvs.len(), DIGEST_LEN + 1);
+
+    let (expected_digest, expected_len) = compute_program_digest(&program);
+    for i in 0..DIGEST_LEN {
+        assert_eq!(pvs[i], expected_digest[i], "digest element {} mismatch", i);
+    }
+    assert_eq!(pvs[PV_LENGTH_INDEX], Val::from_u32(expected_len));
+    assert_eq!(expected_len as usize, program.len());
+
+    // End-to-end: the proof verifies with these public values.
+    assert!(prove_and_verify(traces));
+}
+
+#[test]
+fn program_hash_corrupted_digest_fails_verification() {
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+    // Flip one element of the public-value digest before proving. The AIR
+    // constrains the witness against `builder.public_values()`, so the
+    // resulting proof must fail to verify (or the prover should reject —
+    // either is acceptable as a soundness witness).
+    traces.program_hash_public_values[0] += Val::ONE;
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
+    match result {
+        Ok(ok) => assert!(
+            !ok,
+            "verification accepted a proof with a corrupted digest public value"
+        ),
+        Err(_) => {
+            // Prover panicked on the inconsistent witness — also acceptable.
+        }
+    }
+}
+
+#[test]
+fn program_hash_corrupted_perm_in_fails_verification() {
+    // Tamper with `perm_in[0]` on the first real ProgramHash row. The chip's
+    // Poseidon2 trace was generated from the original `perm_in`, so after
+    // mutation ProgramHash Sends a tuple the chip never Receives ─ the
+    // `poseidon2_perm` bus imbalances and verification must fail.
+    use core::borrow::BorrowMut;
+    use loquela_air::program_hash::columns::{ProgramHashColumns, NUM_COLS};
+
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+
+    {
+        let first_row = &mut traces.program_hash.values[..NUM_COLS];
+        let row: &mut ProgramHashColumns<Val> = first_row.borrow_mut();
+        row.perm_in[0] += Val::ONE;
+    }
+
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
+    match result {
+        Ok(ok) => assert!(
+            !ok,
+            "verification accepted a proof with a tampered perm_in on ProgramHash"
+        ),
+        Err(_) => {}
+    }
+}
+
+#[test]
+fn program_hash_corrupted_padding_state_fails_verification() {
+    // Tamper with the first padding row's `state` column. The AIR pins
+    // `(1 - flag) * state[i] = 0` on padding rows, so any nonzero value
+    // there must be rejected — preventing a prover from feeding a fake
+    // "INIT" into the bottom-up sponge base.
+    use loquela_air::program_hash::columns::NUM_COLS;
+    use p3_matrix::Matrix;
+
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+
+    let n_bytes = program.len();
+    let num_real_rows = n_bytes.div_ceil(24);
+    let first_padding_row = num_real_rows;
+    assert!(
+        first_padding_row < traces.program_hash.height(),
+        "no padding row"
+    );
+    // First column of the row is `state[0]` (per the column layout).
+    traces.program_hash.values[first_padding_row * NUM_COLS] += Val::ONE;
+
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
+    match result {
+        Ok(ok) => assert!(
+            !ok,
+            "verification accepted a proof with a tampered padding state"
+        ),
+        Err(_) => {}
+    }
+}
+
+#[test]
+fn program_hash_corrupted_length_fails_verification() {
+    use loquela_air::program_hash::columns::PV_LENGTH_INDEX;
+
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+    traces.program_hash_public_values[PV_LENGTH_INDEX] += Val::ONE;
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
+    match result {
+        Ok(ok) => assert!(
+            !ok,
+            "verification accepted a proof with a corrupted length public value"
+        ),
+        Err(_) => {}
+    }
+}
+
 /// Dump every AIR's main + preprocessed trace and every lookup tuple
 /// (per row, with non-zero multiplicity), then run `check_lookups` to
 /// surface any global-bus imbalance with location info.
 #[allow(dead_code)]
 fn debug_dump(program: &[u8]) {
     let traces = generate_traces(program);
-    let (mut airs, trace_vecs) = traces.into_vecs();
+    let (mut airs, trace_vecs, _pvs) = traces.into_vecs();
     debug::dump_traces_and_lookups(&mut airs, &trace_vecs);
     debug::check_all_lookups(&mut airs, &trace_vecs);
 }

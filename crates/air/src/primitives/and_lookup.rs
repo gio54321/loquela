@@ -24,7 +24,6 @@ impl Default for AndAir {
     }
 }
 
-
 impl<F: Field> BaseAir<F> for AndAir {
     fn width(&self) -> usize {
         1
