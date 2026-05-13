@@ -42,9 +42,6 @@ use loquela_air::instructions::xor::air::XorInstrAir;
 use loquela_air::instructions::xori::air::XoriAir;
 use loquela_air::memory::air::MemoryAir;
 use loquela_air::poseidon2_chip::air::Poseidon2Chip;
-use loquela_air::program_hash::air::ProgramHashAir;
-use loquela_air::program_hash::columns::NUM_PUBLIC_VALUES as PROGRAM_HASH_NUM_PV;
-use loquela_air::program_hash::trace::compute_program_digest;
 use loquela_air::primitives::and_lookup::AndAir;
 use loquela_air::primitives::byte_less_than_lookup::LessThanAir;
 use loquela_air::primitives::byte_lookup::BytesAir;
@@ -55,6 +52,9 @@ use loquela_air::primitives::timestamp_less_than::TimestampLessThanAir;
 use loquela_air::primitives::u32_less_than_lookup::U32LessThanAir;
 use loquela_air::primitives::xor_lookup::XorAir;
 use loquela_air::program::air::ProgramAir;
+use loquela_air::program_hash::air::ProgramHashAir;
+use loquela_air::program_hash::columns::NUM_PUBLIC_VALUES as PROGRAM_HASH_NUM_PV;
+use loquela_air::program_hash::trace::compute_program_digest;
 use loquela_vm::{Instruction, MemoryOperation, VM};
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -443,13 +443,7 @@ impl AllTraces {
     /// The third element is the per-AIR public-values vector (empty for AIRs
     /// without public values; the program-hash AIR carries
     /// `(digest, length)`).
-    pub fn into_vecs(
-        self,
-    ) -> (
-        Vec<LoquelAir>,
-        Vec<RowMajorMatrix<Val>>,
-        Vec<Vec<Val>>,
-    ) {
+    pub fn into_vecs(self) -> (Vec<LoquelAir>, Vec<RowMajorMatrix<Val>>, Vec<Vec<Val>>) {
         let AllTraces {
             airs,
             boundaries,
@@ -596,9 +590,10 @@ impl AllTraces {
 
         // Per-AIR public values. Only the program-hash instance carries
         // non-empty values; the chip's pvs is empty.
-        let program_hash_idx = airs.len().checked_sub(2).expect(
-            "expected ProgramHash followed by Poseidon2Chip at the tail of the AIR list",
-        );
+        let program_hash_idx = airs
+            .len()
+            .checked_sub(2)
+            .expect("expected ProgramHash followed by Poseidon2Chip at the tail of the AIR list");
         assert!(
             matches!(airs.get(program_hash_idx), Some(LoquelAir::ProgramHash(_))),
             "ProgramHash must be the penultimate AIR (chip is last)"

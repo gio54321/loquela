@@ -10,8 +10,8 @@ use p3_field::{integers::QuotientMap, Field, PrimeCharacteristicRing};
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 
 use super::columns::{
-    NUM_COLS, NUM_PUBLIC_VALUES, ProgramHashColumns, BYTES_PER_RATE_ELEM, BYTES_PER_ROW,
-    DIGEST_LEN, PV_DIGEST_OFFSET, PV_LENGTH_INDEX, RATE_ELEMS, WIDTH,
+    ProgramHashColumns, BYTES_PER_RATE_ELEM, BYTES_PER_ROW, DIGEST_LEN, NUM_COLS,
+    NUM_PUBLIC_VALUES, PV_DIGEST_OFFSET, PV_LENGTH_INDEX, RATE_ELEMS, WIDTH,
 };
 
 /// AIR for the Poseidon2 sponge over the program ROM.
@@ -74,9 +74,9 @@ where
 
         // ─── 2. flag is monotone-falling: once 0, stays 0 ────────────────────
         // Equivalently next.flag = 1 ⇒ local.flag = 1, i.e. next.flag * (1 - local.flag) = 0.
-        builder.when_transition().assert_zero(
-            next.flag.clone() * (AB::Expr::ONE - local.flag.clone().into()),
-        );
+        builder
+            .when_transition()
+            .assert_zero(next.flag.clone() * (AB::Expr::ONE - local.flag.clone().into()));
 
         // ─── 3. Last row is padding: flag = 0 ────────────────────────────────
         // Guarantees the bottom of the bottom-up sponge chain is pinned to INIT.
@@ -139,9 +139,8 @@ where
         // irrelevant and the round constraints (gated by flag below) don't
         // fire — padding rows therefore cost no Poseidon witness.
         for i in 0..WIDTH {
-            builder.assert_zero(
-                (AB::Expr::ONE - local.flag.clone().into()) * local.state[i].clone(),
-            );
+            builder
+                .assert_zero((AB::Expr::ONE - local.flag.clone().into()) * local.state[i].clone());
         }
 
         // ─── 11. Bottom-up sponge absorption (real rows only) ────────────────
@@ -168,9 +167,7 @@ where
                 + b2.into() * AB::F::from_u32(1u32 << 16);
             builder.assert_zero(
                 local.flag.clone()
-                    * (local.perm_in[g].clone().into()
-                        - next.state[g].clone().into()
-                        - packed),
+                    * (local.perm_in[g].clone().into() - next.state[g].clone().into() - packed),
             );
         }
         // Capacity passthrough: perm_in[g] = next.state[g] for g >= RATE.
@@ -281,8 +278,7 @@ impl<F: Field> LookupAir<F> for ProgramHashAir {
         // a malicious prover could put a non-byte field element in
         // `local.bytes[i]` and exploit the 24-bit packing.
         for i in 0..BYTES_PER_ROW {
-            let elements: Vec<SymbolicExpression<F>> =
-                vec![symbolic_local.bytes[i].clone().into()];
+            let elements: Vec<SymbolicExpression<F>> = vec![symbolic_local.bytes[i].clone().into()];
             let mult: SymbolicExpression<F> = symbolic_local.is_active[i].clone().into();
             lookups.push(self.register_lookup(
                 Kind::Global(String::from("bytes")),

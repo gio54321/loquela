@@ -10,14 +10,14 @@ use p3_field::Field;
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_mersenne_31::{
-    GenericPoseidon2LinearLayersMersenne31, MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL,
-    MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL, Mersenne31,
+    GenericPoseidon2LinearLayersMersenne31, Mersenne31, MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL,
+    MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL,
 };
 use p3_poseidon2_air::{Poseidon2Air, RoundConstants};
 
 use super::columns::{
-    ChipCols, HALF_FULL_ROUNDS, NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PARTIAL_ROUNDS,
-    SBOX_DEGREE, SBOX_REGISTERS, WIDTH,
+    ChipCols, HALF_FULL_ROUNDS, NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PARTIAL_ROUNDS, SBOX_DEGREE,
+    SBOX_REGISTERS, WIDTH,
 };
 
 /// Type alias for the inner `Poseidon2Air` over Mersenne31 width-16.

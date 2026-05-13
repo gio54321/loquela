@@ -1,14 +1,13 @@
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_mersenne_31::{
-    GenericPoseidon2LinearLayersMersenne31, MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL,
-    MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL, Mersenne31,
+    GenericPoseidon2LinearLayersMersenne31, Mersenne31, MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL,
+    MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL,
 };
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 
 use super::columns::{
-    BYTES_PER_RATE_ELEM, BYTES_PER_ROW, DIGEST_LEN, NUM_COLS, ProgramHashColumns, RATE_ELEMS,
-    WIDTH,
+    ProgramHashColumns, BYTES_PER_RATE_ELEM, BYTES_PER_ROW, DIGEST_LEN, NUM_COLS, RATE_ELEMS, WIDTH,
 };
 
 const HALF_FULL_ROUNDS: usize = 4;
@@ -109,8 +108,7 @@ pub fn build_trace(program: &[u8]) -> ProgramHashTrace {
     // `perm_inputs[row_idx]` holds the input to that row's Poseidon
     // permutation. Filled during the bottom-up pass; passed to
     // `Poseidon2Chip::build_trace` so the chip permutes the same states.
-    let mut perm_inputs: Vec<[Mersenne31; WIDTH]> =
-        vec![[Mersenne31::ZERO; WIDTH]; num_real_rows];
+    let mut perm_inputs: Vec<[Mersenne31; WIDTH]> = vec![[Mersenne31::ZERO; WIDTH]; num_real_rows];
     {
         let (prefix, rows, suffix) =
             unsafe { values.align_to_mut::<ProgramHashColumns<Mersenne31>>() };
@@ -191,7 +189,9 @@ mod tests {
     fn digest_matches_host_computation_for_various_lengths() {
         // Boundary cases around the 24-byte chunking plus a larger program.
         for n in [1usize, 7, 23, 24, 25, 48, 49, 128] {
-            let program: Vec<u8> = (0..n).map(|i| (i as u8).wrapping_mul(31).wrapping_add(7)).collect();
+            let program: Vec<u8> = (0..n)
+                .map(|i| (i as u8).wrapping_mul(31).wrapping_add(7))
+                .collect();
             let (expected_digest, expected_len) = compute_program_digest(&program);
             assert_eq!(expected_len as usize, n);
             let trace = trace_digest(&program);

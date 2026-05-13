@@ -167,9 +167,8 @@ fn program_hash_corrupted_digest_fails_verification() {
     // resulting proof must fail to verify (or the prover should reject —
     // either is acceptable as a soundness witness).
     traces.program_hash_public_values[0] += Val::ONE;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        prove_and_verify(traces)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
     match result {
         Ok(ok) => assert!(
             !ok,
@@ -188,7 +187,7 @@ fn program_hash_corrupted_perm_in_fails_verification() {
     // mutation ProgramHash Sends a tuple the chip never Receives ─ the
     // `poseidon2_perm` bus imbalances and verification must fail.
     use core::borrow::BorrowMut;
-    use loquela_air::program_hash::columns::{NUM_COLS, ProgramHashColumns};
+    use loquela_air::program_hash::columns::{ProgramHashColumns, NUM_COLS};
 
     let program = encode_addi(1, 0, 1).to_vec();
     let mut traces = generate_traces(&program);
@@ -199,9 +198,8 @@ fn program_hash_corrupted_perm_in_fails_verification() {
         row.perm_in[0] += Val::ONE;
     }
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        prove_and_verify(traces)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
     match result {
         Ok(ok) => assert!(
             !ok,
@@ -226,13 +224,15 @@ fn program_hash_corrupted_padding_state_fails_verification() {
     let n_bytes = program.len();
     let num_real_rows = n_bytes.div_ceil(24);
     let first_padding_row = num_real_rows;
-    assert!(first_padding_row < traces.program_hash.height(), "no padding row");
+    assert!(
+        first_padding_row < traces.program_hash.height(),
+        "no padding row"
+    );
     // First column of the row is `state[0]` (per the column layout).
     traces.program_hash.values[first_padding_row * NUM_COLS] += Val::ONE;
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        prove_and_verify(traces)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
     match result {
         Ok(ok) => assert!(
             !ok,
@@ -249,9 +249,8 @@ fn program_hash_corrupted_length_fails_verification() {
     let program = encode_addi(1, 0, 1).to_vec();
     let mut traces = generate_traces(&program);
     traces.program_hash_public_values[PV_LENGTH_INDEX] += Val::ONE;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        prove_and_verify(traces)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prove_and_verify(traces)));
     match result {
         Ok(ok) => assert!(
             !ok,

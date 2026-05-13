@@ -4,9 +4,7 @@ use p3_mersenne_31::Mersenne31;
 use p3_poseidon2_air::generate_trace_rows;
 
 use super::air::ROUND_CONSTANTS;
-use super::columns::{
-    HALF_FULL_ROUNDS, PARTIAL_ROUNDS, SBOX_DEGREE, SBOX_REGISTERS, WIDTH,
-};
+use super::columns::{HALF_FULL_ROUNDS, PARTIAL_ROUNDS, SBOX_DEGREE, SBOX_REGISTERS, WIDTH};
 
 /// Build the chip's main trace.
 ///
