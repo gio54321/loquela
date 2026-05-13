@@ -6,42 +6,28 @@ use p3_air::{
     Air, AirBuilder, AirLayout, BaseAir, SymbolicAirBuilder, SymbolicExpression, SymbolicVariable,
     WindowAccess,
 };
-use p3_field::{integers::QuotientMap, Field, PrimeCharacteristicRing, PrimeField32};
+use p3_field::{integers::QuotientMap, Field, PrimeCharacteristicRing};
 use p3_lookup::{Direction, Kind, Lookup, LookupAir};
-use p3_mersenne_31::{
-    GenericPoseidon2LinearLayersMersenne31, MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL,
-    MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL,
-};
-use p3_poseidon2::GenericPoseidon2LinearLayers;
-use p3_poseidon2_air::{FullRound, PartialRound, SBox};
 
 use super::columns::{
     NUM_COLS, NUM_PUBLIC_VALUES, ProgramHashColumns, BYTES_PER_RATE_ELEM, BYTES_PER_ROW,
-    DIGEST_LEN, HALF_FULL_ROUNDS, PARTIAL_ROUNDS, PV_DIGEST_OFFSET, PV_LENGTH_INDEX, RATE_ELEMS,
-    SBOX_DEGREE, SBOX_REGISTERS, WIDTH,
+    DIGEST_LEN, PV_DIGEST_OFFSET, PV_LENGTH_INDEX, RATE_ELEMS, WIDTH,
 };
 
 /// AIR for the Poseidon2 sponge over the program ROM.
 ///
 /// The trace is a real prefix (`flag = 1`) followed by a padding suffix
-/// (`flag = 0`). The sponge chains BOTTOM-UP across rows:
-///   - Padding rows pin `state = INIT = 0`. No Poseidon witness is needed; all
-///     round constraints are gated by `flag` so the AIR pays zero cost on
-///     padding rows.
-///   - Real rows compute `state.cur = Poseidon(next.state, chunk.cur)` where
-///     `chunk.cur` is the 24 absorbed bytes packed 3 per rate lane. The bottom
-///     of the chain (row `k - 1`) pulls `next.state` from the first padding
-///     row, which is `INIT`.
+/// (`flag = 0`). The sponge chains BOTTOM-UP across rows: each real row
+/// computes `state.cur = Poseidon(next.state, chunk.cur)`, with the bottom
+/// of the chain (the first padding row) pinned to the all-zero `INIT` state.
+/// The digest therefore lives in `state` at row 0 and is exposed via
+/// `public_values`.
 ///
-/// Consequences:
-///   - The digest naturally lives at row 0 (`state[0..DIGEST_LEN]`) and is
-///     pinned to the public-value vector via a clean `when_first_row` boundary.
-///   - Program length `L = cum_active` (forward accumulator) is pinned to the
-///     last row's `cum_active` via `when_last_row`.
-///   - Absorption order is reverse of trace order: bytes of `chunk[k-1]`
-///     (program's tail) are absorbed first into INIT, bytes of `chunk[0]`
-///     (program's head) are absorbed last. The host-side helper
-///     `compute_program_digest` mirrors this order.
+/// The Poseidon2 permutation itself is *not* constrained here. Each row
+/// commits the permutation input/output as `perm_in` / `perm_out` columns and
+/// Sends them on the `poseidon2_perm` bus; the round-, S-box-, and
+/// linear-layer constraints live on the `Poseidon2Chip` AIR, which wraps the
+/// upstream `p3_poseidon2_air::Poseidon2Air` directly.
 #[derive(Clone)]
 pub struct ProgramHashAir {
     num_lookups: usize,
@@ -67,66 +53,6 @@ impl<F> BaseAir<F> for ProgramHashAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-
-    /// All constraints are bounded by the Poseidon2 S-box recipe at degree 3
-    /// (committing `x^3` and then asserting `x^5 = x^3 * x^2`). Boolean and
-    /// `is_active` × `bytes` cross-products are also degree 2-3. Mirror the
-    /// upstream `Poseidon2Air` bound of `SBOX_DEGREE` (5) as an upper limit so
-    /// p3-batch-stark allocates the right number of quotient chunks.
-    fn max_constraint_degree(&self) -> Option<usize> {
-        Some(SBOX_DEGREE as usize)
-    }
-}
-
-/// S-box helper for `(DEGREE=5, REGISTERS=1)`. Equivalent in shape to
-/// `p3_poseidon2_air::eval_sbox` but inlined because that one is crate-private.
-///
-/// One witness register `r = x^3` (constrained as `r - x*x*x = 0`, degree 3).
-/// Returns `x^5` as `r * x * x` (degree 3 in the witness).
-fn eval_sbox_5_1<AB: AirBuilder>(sbox: &SBox<AB::Var, 5, 1>, x: &mut AB::Expr, builder: &mut AB) {
-    let committed_x3: AB::Expr = sbox.0[0].into();
-    let x_clone = x.clone();
-    let x2 = x_clone.clone() * x_clone.clone();
-    // Force the register to hold x^3.
-    builder.assert_eq(committed_x3.clone(), x2.clone() * x_clone.clone());
-    // Output x^5 = x^3 * x^2.
-    *x = committed_x3 * x2;
-}
-
-fn eval_full_round<AB, LinearLayers>(
-    state: &mut [AB::Expr; WIDTH],
-    full_round: &FullRound<AB::Var, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
-    round_constants: &[AB::Expr; WIDTH],
-    builder: &mut AB,
-) where
-    AB: AirBuilder,
-    LinearLayers: GenericPoseidon2LinearLayers<WIDTH>,
-{
-    for (i, (s, rc)) in state.iter_mut().zip(round_constants.iter()).enumerate() {
-        *s = s.clone() + rc.clone();
-        eval_sbox_5_1(&full_round.sbox[i], s, builder);
-    }
-    <LinearLayers as GenericPoseidon2LinearLayers<WIDTH>>::external_linear_layer::<AB::Expr>(state);
-    for (state_i, post_i) in state.iter_mut().zip(full_round.post) {
-        builder.assert_eq(state_i.clone(), post_i);
-        *state_i = post_i.into();
-    }
-}
-
-fn eval_partial_round<AB, LinearLayers>(
-    state: &mut [AB::Expr; WIDTH],
-    partial_round: &PartialRound<AB::Var, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
-    round_constant: AB::Expr,
-    builder: &mut AB,
-) where
-    AB: AirBuilder,
-    LinearLayers: GenericPoseidon2LinearLayers<WIDTH>,
-{
-    state[0] = state[0].clone() + round_constant;
-    eval_sbox_5_1(&partial_round.sbox, &mut state[0], builder);
-    builder.assert_eq(state[0].clone(), partial_round.post_sbox);
-    state[0] = partial_round.post_sbox.into();
-    <LinearLayers as GenericPoseidon2LinearLayers<WIDTH>>::internal_linear_layer::<AB::Expr>(state);
 }
 
 impl<AB> Air<AB> for ProgramHashAir
@@ -231,6 +157,8 @@ where
         // `max_constraint_degree`.
 
         // Absorption inputs to the permutation.
+        // Rate absorption: perm_in[g] = next.state[g] + packed[g] for g < RATE,
+        // gated by flag.
         for g in 0..RATE_ELEMS {
             let b0 = local.bytes[BYTES_PER_RATE_ELEM * g].clone();
             let b1 = local.bytes[BYTES_PER_RATE_ELEM * g + 1].clone();
@@ -240,73 +168,31 @@ where
                 + b2.into() * AB::F::from_u32(1u32 << 16);
             builder.assert_zero(
                 local.flag.clone()
-                    * (local.perm.inputs[g].clone().into()
+                    * (local.perm_in[g].clone().into()
                         - next.state[g].clone().into()
                         - packed),
             );
         }
+        // Capacity passthrough: perm_in[g] = next.state[g] for g >= RATE.
         for g in RATE_ELEMS..WIDTH {
             builder.assert_zero(
                 local.flag.clone()
-                    * (local.perm.inputs[g].clone().into() - next.state[g].clone().into()),
+                    * (local.perm_in[g].clone().into() - next.state[g].clone().into()),
             );
         }
 
-        // Poseidon2 round chain: initial MDS → 4 full → 14 partial → 4 full.
-        // Wrapped in a `when(flag)` filtered builder so every assert_eq inside
-        // is gated by flag. State propagates as symbolic expressions through
-        // the chain; on padding rows the chain still executes symbolically but
-        // every assertion is multiplied by 0.
-        {
-            let mut fb = builder.when(local.flag.clone());
-            let mut state: [AB::Expr; WIDTH] =
-                local.perm.inputs.clone().map(AB::Expr::from);
-            <GenericPoseidon2LinearLayersMersenne31 as GenericPoseidon2LinearLayers<WIDTH>>::external_linear_layer::<AB::Expr>(&mut state);
-            for r in 0..HALF_FULL_ROUNDS {
-                let rc_row = &MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL[r];
-                let rc_exprs: [AB::Expr; WIDTH] = core::array::from_fn(|i| {
-                    AB::Expr::from(AB::F::from_u32(rc_row[i].as_canonical_u32()))
-                });
-                eval_full_round::<_, GenericPoseidon2LinearLayersMersenne31>(
-                    &mut state,
-                    &local.perm.beginning_full_rounds[r],
-                    &rc_exprs,
-                    &mut fb,
-                );
-            }
-            for r in 0..PARTIAL_ROUNDS {
-                let rc: AB::Expr = AB::Expr::from(AB::F::from_u32(
-                    MERSENNE31_POSEIDON2_RC_16_INTERNAL[r].as_canonical_u32(),
-                ));
-                eval_partial_round::<_, GenericPoseidon2LinearLayersMersenne31>(
-                    &mut state,
-                    &local.perm.partial_rounds[r],
-                    rc,
-                    &mut fb,
-                );
-            }
-            for r in 0..HALF_FULL_ROUNDS {
-                let rc_row = &MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL[r];
-                let rc_exprs: [AB::Expr; WIDTH] = core::array::from_fn(|i| {
-                    AB::Expr::from(AB::F::from_u32(rc_row[i].as_canonical_u32()))
-                });
-                eval_full_round::<_, GenericPoseidon2LinearLayersMersenne31>(
-                    &mut state,
-                    &local.perm.ending_full_rounds[r],
-                    &rc_exprs,
-                    &mut fb,
-                );
-            }
-        }
+        // The Poseidon2 permutation itself is enforced on the Poseidon2Chip
+        // AIR (via the upstream `Poseidon2Air`); on this AIR we only need to
+        // commit the input/output and link the output back to `state`.
 
-        // local.state[i] = local.perm.ending_full_rounds[last].post[i], gated by flag.
+        // state[i] = perm_out[i] on real rows. On padding rows (flag = 0)
+        // `state` is already pinned to zero by the padding-row state pin
+        // above, and `perm_out` is unconstrained (it never reaches the bus
+        // because the Send has multiplicity `flag`).
         for i in 0..WIDTH {
             builder.assert_zero(
                 local.flag.clone()
-                    * (local.state[i].clone().into()
-                        - local.perm.ending_full_rounds[HALF_FULL_ROUNDS - 1].post[i]
-                            .clone()
-                            .into()),
+                    * (local.state[i].clone().into() - local.perm_out[i].clone().into()),
             );
         }
 
@@ -400,6 +286,24 @@ impl<F: Field> LookupAir<F> for ProgramHashAir {
             let mult: SymbolicExpression<F> = symbolic_local.is_active[i].clone().into();
             lookups.push(self.register_lookup(
                 Kind::Global(String::from("bytes")),
+                &vec![(elements, mult, Direction::Send)],
+            ));
+        }
+
+        // Poseidon2 permutation: Send (perm_in[0..16], perm_out[0..16]) with
+        // multiplicity `flag`. The Poseidon2Chip AIR Receives the matching
+        // tuples (with multiplicity = its own preprocessed `is_real`) and
+        // enforces the Poseidon2 round constraints via the upstream AIR.
+        {
+            let elements: Vec<SymbolicExpression<F>> = symbolic_local
+                .perm_in
+                .iter()
+                .chain(symbolic_local.perm_out.iter())
+                .map(|v| (*v).into())
+                .collect();
+            let mult: SymbolicExpression<F> = symbolic_local.flag.clone().into();
+            lookups.push(self.register_lookup(
+                Kind::Global(String::from("poseidon2_perm")),
                 &vec![(elements, mult, Direction::Send)],
             ));
         }

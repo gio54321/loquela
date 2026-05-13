@@ -182,6 +182,36 @@ fn program_hash_corrupted_digest_fails_verification() {
 }
 
 #[test]
+fn program_hash_corrupted_perm_in_fails_verification() {
+    // Tamper with `perm_in[0]` on the first real ProgramHash row. The chip's
+    // Poseidon2 trace was generated from the original `perm_in`, so after
+    // mutation ProgramHash Sends a tuple the chip never Receives ─ the
+    // `poseidon2_perm` bus imbalances and verification must fail.
+    use core::borrow::BorrowMut;
+    use loquela_air::program_hash::columns::{NUM_COLS, ProgramHashColumns};
+
+    let program = encode_addi(1, 0, 1).to_vec();
+    let mut traces = generate_traces(&program);
+
+    {
+        let first_row = &mut traces.program_hash.values[..NUM_COLS];
+        let row: &mut ProgramHashColumns<Val> = first_row.borrow_mut();
+        row.perm_in[0] += Val::ONE;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        prove_and_verify(traces)
+    }));
+    match result {
+        Ok(ok) => assert!(
+            !ok,
+            "verification accepted a proof with a tampered perm_in on ProgramHash"
+        ),
+        Err(_) => {}
+    }
+}
+
+#[test]
 fn program_hash_corrupted_padding_state_fails_verification() {
     // Tamper with the first padding row's `state` column. The AIR pins
     // `(1 - flag) * state[i] = 0` on padding rows, so any nonzero value

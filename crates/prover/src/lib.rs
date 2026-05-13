@@ -41,6 +41,7 @@ use loquela_air::instructions::sub::air::SubAir;
 use loquela_air::instructions::xor::air::XorInstrAir;
 use loquela_air::instructions::xori::air::XoriAir;
 use loquela_air::memory::air::MemoryAir;
+use loquela_air::poseidon2_chip::air::Poseidon2Chip;
 use loquela_air::program_hash::air::ProgramHashAir;
 use loquela_air::program_hash::columns::NUM_PUBLIC_VALUES as PROGRAM_HASH_NUM_PV;
 use loquela_air::program_hash::trace::compute_program_digest;
@@ -114,6 +115,7 @@ pub enum LoquelAir {
     Memory(MemoryAir),
     Program(ProgramAir),
     ProgramHash(ProgramHashAir),
+    Poseidon2Chip(Poseidon2Chip),
     Bytes(BytesAir),
     And(AndAir),
     ByteSll(ByteShiftLeftAir),
@@ -158,6 +160,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::Memory(a) => BaseAir::<F>::width(a),
             LoquelAir::Program(a) => BaseAir::<F>::width(a),
             LoquelAir::ProgramHash(a) => BaseAir::<F>::width(a),
+            LoquelAir::Poseidon2Chip(a) => BaseAir::<F>::width(a),
             LoquelAir::Bytes(a) => BaseAir::<F>::width(a),
             LoquelAir::And(a) => BaseAir::<F>::width(a),
             LoquelAir::ByteSll(a) => BaseAir::<F>::width(a),
@@ -192,6 +195,7 @@ impl<F: Field> BaseAir<F> for LoquelAir {
             LoquelAir::AndPrim(a) => a.preprocessed_trace(),
             LoquelAir::OrPrim(a) => a.preprocessed_trace(),
             LoquelAir::BytesLt(a) => a.preprocessed_trace(),
+            LoquelAir::Poseidon2Chip(a) => <Poseidon2Chip as BaseAir<F>>::preprocessed_trace(a),
             _ => None,
         }
     }
@@ -206,7 +210,11 @@ impl<F: Field> BaseAir<F> for LoquelAir {
 
 impl<AB> Air<AB> for LoquelAir
 where
-    AB: AirBuilder,
+    // The Poseidon2 chip wraps `Poseidon2Air<Mersenne31, ...>`, whose Air impl
+    // is parameterised by the builder's field. Pinning `AB::F = Mersenne31`
+    // both makes that delegation type-check and matches the proving config
+    // (which uses Mersenne31 as Val).
+    AB: AirBuilder<F = p3_mersenne_31::Mersenne31>,
     AB::MainWindow: WindowAccess<AB::Var>,
     AB::F: Field + QuotientMap<u32>,
 {
@@ -232,6 +240,7 @@ where
             LoquelAir::Memory(a) => a.eval(builder),
             LoquelAir::Program(a) => a.eval(builder),
             LoquelAir::ProgramHash(a) => a.eval(builder),
+            LoquelAir::Poseidon2Chip(a) => a.eval(builder),
             LoquelAir::Bytes(a) => a.eval(builder),
             LoquelAir::And(a) => a.eval(builder),
             LoquelAir::ByteSll(a) => a.eval(builder),
@@ -278,6 +287,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::ProgramHash(a) => <ProgramHashAir as LookupAir<F>>::add_lookup_columns(a),
+            LoquelAir::Poseidon2Chip(a) => <Poseidon2Chip as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::add_lookup_columns(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::add_lookup_columns(a),
@@ -324,6 +334,7 @@ impl<F: Field> LookupAir<F> for LoquelAir {
             LoquelAir::Memory(a) => <MemoryAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::Program(a) => <ProgramAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::ProgramHash(a) => <ProgramHashAir as LookupAir<F>>::get_lookups(a),
+            LoquelAir::Poseidon2Chip(a) => <Poseidon2Chip as LookupAir<F>>::get_lookups(a),
             LoquelAir::Bytes(a) => <BytesAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::And(a) => <AndAir as LookupAir<F>>::get_lookups(a),
             LoquelAir::ByteSll(a) => <ByteShiftLeftAir as LookupAir<F>>::get_lookups(a),
@@ -359,6 +370,10 @@ pub struct AllTraces {
     pub program_hash: RowMajorMatrix<Val>,
     /// `(digest_0, ..., digest_7, program_length)` exposed to the verifier.
     pub program_hash_public_values: Vec<Val>,
+    pub poseidon2_chip: RowMajorMatrix<Val>,
+    /// Number of real Poseidon permutation rows on the chip. Used by the AIR
+    /// to size its preprocessed `is_real` column.
+    pub poseidon2_chip_num_real_rows: usize,
     pub bytes: RowMajorMatrix<Val>,
     pub and: RowMajorMatrix<Val>,
     pub or: RowMajorMatrix<Val>,
@@ -443,6 +458,8 @@ impl AllTraces {
             program,
             program_hash,
             program_hash_public_values,
+            poseidon2_chip,
+            poseidon2_chip_num_real_rows: _,
             bytes,
             and,
             or,
@@ -570,22 +587,28 @@ impl AllTraces {
         if let Some(t) = jalr {
             traces.push(t);
         }
-        // Program hash trace is appended last, mirroring its position in the
-        // AIR list (set when constructing AllTraces in `generate_traces`).
+        // Append the program-hash trace and then the Poseidon2 chip trace,
+        // mirroring the AIR-list order set in `generate_traces`. The chip
+        // sits AFTER ProgramHash; ProgramHash's public-values index in the
+        // pvs vector therefore moves up by one.
         traces.push(program_hash);
+        traces.push(poseidon2_chip);
 
         // Per-AIR public values. Only the program-hash instance carries
-        // non-empty values, and `generate_traces` guarantees ProgramHash is the
-        // last AIR. Assert that invariant here so a future refactor that
-        // reorders the AIR list fails loudly instead of misrouting PVs.
+        // non-empty values; the chip's pvs is empty.
+        let program_hash_idx = airs.len().checked_sub(2).expect(
+            "expected ProgramHash followed by Poseidon2Chip at the tail of the AIR list",
+        );
         assert!(
-            matches!(airs.last(), Some(LoquelAir::ProgramHash(_))),
-            "ProgramHash must be the last AIR so its public values land in the final PV slot"
+            matches!(airs.get(program_hash_idx), Some(LoquelAir::ProgramHash(_))),
+            "ProgramHash must be the penultimate AIR (chip is last)"
+        );
+        assert!(
+            matches!(airs.last(), Some(LoquelAir::Poseidon2Chip(_))),
+            "Poseidon2Chip must be the last AIR"
         );
         let mut pvs: Vec<Vec<Val>> = vec![vec![]; airs.len()];
-        if let Some(last) = pvs.last_mut() {
-            *last = program_hash_public_values;
-        }
+        pvs[program_hash_idx] = program_hash_public_values;
         (airs, traces, pvs)
     }
 }
@@ -1478,18 +1501,29 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
     if has_jalr {
         airs.push(LoquelAir::Jalr(JalrAir::new()));
     }
-    // Program-hash AIR is appended last so its public values land in the final
-    // slot of the per-AIR public-values vector built by `into_vecs`.
-    airs.push(LoquelAir::ProgramHash(ProgramHashAir::new()));
 
     // Program-image Poseidon2 trace + matching public values.
-    let program_hash =
-        loquela_air::program_hash::trace::build_trace(program);
+    let program_hash_trace = loquela_air::program_hash::trace::build_trace(program);
     let (digest, length) = compute_program_digest(program);
     let mut program_hash_public_values: Vec<Val> = Vec::with_capacity(PROGRAM_HASH_NUM_PV);
     program_hash_public_values.extend_from_slice(&digest);
     program_hash_public_values.push(Val::from_u32(length));
     debug_assert_eq!(program_hash_public_values.len(), PROGRAM_HASH_NUM_PV);
+
+    // Poseidon2 permutation chip: one real row per real ProgramHash row.
+    let poseidon2_chip_num_real_rows = program_hash_trace.perm_inputs.len();
+    let poseidon2_chip =
+        loquela_air::poseidon2_chip::trace::build_trace(&program_hash_trace.perm_inputs);
+
+    // ProgramHashAir comes before Poseidon2Chip in the AIR list; their order
+    // is mirrored by `AllTraces::into_vecs` and the per-AIR public-values
+    // slot for ProgramHash is placed at `airs.len() - 2`.
+    airs.push(LoquelAir::ProgramHash(ProgramHashAir::new()));
+    airs.push(LoquelAir::Poseidon2Chip(Poseidon2Chip::new(
+        poseidon2_chip_num_real_rows,
+    )));
+
+    let program_hash = program_hash_trace.main;
 
     AllTraces {
         airs,
@@ -1499,6 +1533,8 @@ pub fn generate_traces(program: &[u8]) -> AllTraces {
         program: program_trace,
         program_hash,
         program_hash_public_values,
+        poseidon2_chip,
+        poseidon2_chip_num_real_rows,
         bytes,
         and,
         or,

@@ -1,14 +1,10 @@
 use core::borrow::{Borrow, BorrowMut};
 use core::mem::size_of;
 
-use p3_poseidon2_air::Poseidon2Cols;
-
-/// Width-16 Mersenne31 Poseidon2 parameters.
+/// Width of the Poseidon2 state. Mirrors the value used by the
+/// `Poseidon2Chip` AIR; we duplicate it here so this module does not depend
+/// on the chip's column layout.
 pub const WIDTH: usize = 16;
-pub const SBOX_DEGREE: u64 = 5;
-pub const SBOX_REGISTERS: usize = 1;
-pub const HALF_FULL_ROUNDS: usize = 4;
-pub const PARTIAL_ROUNDS: usize = 14;
 
 /// Number of program bytes absorbed per Poseidon2 row.
 ///
@@ -25,9 +21,6 @@ pub const DIGEST_LEN: usize = 8;
 pub const NUM_PUBLIC_VALUES: usize = DIGEST_LEN + 1;
 pub const PV_DIGEST_OFFSET: usize = 0;
 pub const PV_LENGTH_INDEX: usize = DIGEST_LEN;
-
-pub type P2Cols<T> =
-    Poseidon2Cols<T, WIDTH, SBOX_DEGREE, SBOX_REGISTERS, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>;
 
 /// Columns for the program-image Poseidon2 sponge AIR.
 ///
@@ -75,14 +68,19 @@ pub struct ProgramHashColumns<T> {
     /// Asserted against `public_values[PV_LENGTH_INDEX]` on the last row.
     pub cum_active: T,
 
-    /// Poseidon2 permutation witness (inputs + per-round S-box registers and
-    /// post-states). On real rows the AIR constrains
-    /// `perm.inputs[g] = next.state[g] + packed[g]` for rate lanes and
-    /// `perm.inputs[g] = next.state[g]` for capacity lanes, and
-    /// `state[i] = perm.ending_full_rounds[..].post[i]`. All Poseidon
-    /// constraints are gated by `flag`, so this witness is freely zero on
-    /// padding rows.
-    pub perm: P2Cols<T>,
+    /// Input state to this row's Poseidon2 permutation. On real rows the AIR
+    /// constrains `perm_in[g] = next.state[g] + packed[g]` on rate lanes and
+    /// `perm_in[g] = next.state[g]` on capacity lanes. The actual permutation
+    /// constraints (S-box / round chain) live on a separate `Poseidon2Chip`
+    /// AIR; this row Sends `(perm_in, perm_out)` to the `poseidon2_perm` bus
+    /// with multiplicity `flag`.
+    pub perm_in: [T; WIDTH],
+
+    /// Output state of this row's Poseidon2 permutation, as reported by the
+    /// chip. On real rows the AIR constrains `state[i] = perm_out[i]`; on
+    /// padding rows `perm_out` is left unconstrained, since the Send tuple's
+    /// multiplicity is `flag = 0` there and the value never reaches the bus.
+    pub perm_out: [T; WIDTH],
 }
 
 pub const NUM_COLS: usize = size_of::<ProgramHashColumns<u8>>();

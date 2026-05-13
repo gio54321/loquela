@@ -5,66 +5,18 @@ use p3_mersenne_31::{
     MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL, MERSENNE31_POSEIDON2_RC_16_INTERNAL, Mersenne31,
 };
 use p3_poseidon2::GenericPoseidon2LinearLayers;
-use p3_poseidon2_air::FullRound;
 
 use super::columns::{
-    BYTES_PER_RATE_ELEM, BYTES_PER_ROW, DIGEST_LEN, HALF_FULL_ROUNDS, NUM_COLS, P2Cols,
-    PARTIAL_ROUNDS, ProgramHashColumns, RATE_ELEMS, WIDTH,
+    BYTES_PER_RATE_ELEM, BYTES_PER_ROW, DIGEST_LEN, NUM_COLS, ProgramHashColumns, RATE_ELEMS,
+    WIDTH,
 };
 
-/// Fill the Poseidon2 witness columns for one permutation invocation. Mirrors
-/// `p3_poseidon2_air::generate_trace_rows_for_perm` but works on initialized
-/// columns (we wrote zeros earlier) and uses concrete Mersenne31 constants.
-fn fill_perm(perm: &mut P2Cols<Mersenne31>, state_in: [Mersenne31; WIDTH]) {
-    perm.inputs = state_in;
-    let mut state = state_in;
-    GenericPoseidon2LinearLayersMersenne31::external_linear_layer::<Mersenne31>(&mut state);
-
-    for r in 0..HALF_FULL_ROUNDS {
-        fill_full_round(
-            &mut state,
-            &mut perm.beginning_full_rounds[r],
-            &MERSENNE31_POSEIDON2_RC_16_EXTERNAL_INITIAL[r],
-        );
-    }
-    for r in 0..PARTIAL_ROUNDS {
-        state[0] += MERSENNE31_POSEIDON2_RC_16_INTERNAL[r];
-        let x = state[0];
-        let x2 = x * x;
-        let x3 = x2 * x;
-        perm.partial_rounds[r].sbox.0[0] = x3;
-        state[0] = x3 * x2;
-        perm.partial_rounds[r].post_sbox = state[0];
-        GenericPoseidon2LinearLayersMersenne31::internal_linear_layer::<Mersenne31>(&mut state);
-    }
-    for r in 0..HALF_FULL_ROUNDS {
-        fill_full_round(
-            &mut state,
-            &mut perm.ending_full_rounds[r],
-            &MERSENNE31_POSEIDON2_RC_16_EXTERNAL_FINAL[r],
-        );
-    }
-}
-
-fn fill_full_round(
-    state: &mut [Mersenne31; WIDTH],
-    round: &mut FullRound<Mersenne31, WIDTH, 5, 1>,
-    rc: &[Mersenne31; WIDTH],
-) {
-    for i in 0..WIDTH {
-        state[i] += rc[i];
-        let x = state[i];
-        let x2 = x * x;
-        let x3 = x2 * x;
-        round.sbox[i].0[0] = x3;
-        state[i] = x3 * x2;
-    }
-    GenericPoseidon2LinearLayersMersenne31::external_linear_layer::<Mersenne31>(state);
-    round.post = *state;
-}
+const HALF_FULL_ROUNDS: usize = 4;
+const PARTIAL_ROUNDS: usize = 14;
 
 /// Apply one Poseidon2-Mersenne31<WIDTH=16> permutation in-host. Mirrors the
-/// round chain the AIR constrains.
+/// round chain the Poseidon2Chip AIR constrains via the upstream
+/// `p3_poseidon2_air::Poseidon2Air`.
 fn permute_in_host(state: &mut [Mersenne31; WIDTH]) {
     GenericPoseidon2LinearLayersMersenne31::external_linear_layer::<Mersenne31>(state);
     for r in 0..HALF_FULL_ROUNDS {
@@ -135,7 +87,16 @@ pub fn compute_program_digest(program: &[u8]) -> ([Mersenne31; DIGEST_LEN], u32)
 /// first padding row, accumulating up through the real rows. Padding rows have
 /// `state = 0`, `perm = 0`, and zero Poseidon work; constraints on padding
 /// rows are gated off by `flag = 0`.
-pub fn build_trace(program: &[u8]) -> RowMajorMatrix<Mersenne31> {
+/// Result of `build_trace`: the main ProgramHash trace plus the per-real-row
+/// Poseidon permutation inputs (in row order, lowest row first). The latter
+/// feeds `Poseidon2Chip` trace generation so the chip permutes the same inputs
+/// our `perm_in` columns commit to.
+pub struct ProgramHashTrace {
+    pub main: RowMajorMatrix<Mersenne31>,
+    pub perm_inputs: Vec<[Mersenne31; WIDTH]>,
+}
+
+pub fn build_trace(program: &[u8]) -> ProgramHashTrace {
     let n = program.len();
     assert!(n > 0, "program must be non-empty");
     let num_real_rows = n.div_ceil(BYTES_PER_ROW);
@@ -145,6 +106,11 @@ pub fn build_trace(program: &[u8]) -> RowMajorMatrix<Mersenne31> {
     let num_rows = (num_real_rows + 1).next_power_of_two().max(4);
 
     let mut values = vec![Mersenne31::ZERO; num_rows * NUM_COLS];
+    // `perm_inputs[row_idx]` holds the input to that row's Poseidon
+    // permutation. Filled during the bottom-up pass; passed to
+    // `Poseidon2Chip::build_trace` so the chip permutes the same states.
+    let mut perm_inputs: Vec<[Mersenne31; WIDTH]> =
+        vec![[Mersenne31::ZERO; WIDTH]; num_real_rows];
     {
         let (prefix, rows, suffix) =
             unsafe { values.align_to_mut::<ProgramHashColumns<Mersenne31>>() };
@@ -178,7 +144,7 @@ pub fn build_trace(program: &[u8]) -> RowMajorMatrix<Mersenne31> {
         // ── Pass 2: bottom-up sponge chain. Start at INIT (= [0; WIDTH]) below
         // the lowest real row, absorb each row's chunk, and write the post-
         // permutation state back into the row's `state` column. Padding rows
-        // keep `state = 0` and `perm = 0` (already zeroed by `vec![0; ..]`).
+        // keep `state = 0` and `perm_in = perm_out = 0` (already zeroed).
         let mut acc = [Mersenne31::ZERO; WIDTH];
         for row_idx in (0..num_real_rows).rev() {
             let row = &mut rows[row_idx];
@@ -188,13 +154,22 @@ pub fn build_trace(program: &[u8]) -> RowMajorMatrix<Mersenne31> {
                 let packed = pack_lane(program, base);
                 perm_in[g] += Mersenne31::from_u32(packed);
             }
-            fill_perm(&mut row.perm, perm_in);
-            acc = row.perm.ending_full_rounds[HALF_FULL_ROUNDS - 1].post;
-            row.state = acc;
+            let mut perm_out = perm_in;
+            permute_in_host(&mut perm_out);
+
+            row.perm_in = perm_in;
+            row.perm_out = perm_out;
+            row.state = perm_out;
+            perm_inputs[row_idx] = perm_in;
+
+            acc = perm_out;
         }
     }
 
-    RowMajorMatrix::new(values, NUM_COLS)
+    ProgramHashTrace {
+        main: RowMajorMatrix::new(values, NUM_COLS),
+        perm_inputs,
+    }
 }
 
 #[cfg(test)]
@@ -204,8 +179,8 @@ mod tests {
 
     fn trace_digest(program: &[u8]) -> [Mersenne31; DIGEST_LEN] {
         // In bottom-up chaining, the digest is at row 0 (top of the chain).
-        let matrix = build_trace(program);
-        let row_slice: &[Mersenne31] = &matrix.values[..NUM_COLS];
+        let trace = build_trace(program);
+        let row_slice: &[Mersenne31] = &trace.main.values[..NUM_COLS];
         let row: &ProgramHashColumns<Mersenne31> = row_slice.borrow();
         let mut out = [Mersenne31::ZERO; DIGEST_LEN];
         out.copy_from_slice(&row.state[..DIGEST_LEN]);
